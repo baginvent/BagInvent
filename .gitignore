@@ -15,6 +15,9 @@ dist-ssr
 coverage
 *.tsbuildinfo
 *.local
+.env
+.env.*
+!.env.example
 
 # Supabase local artifacts
 supabase/.temp/
