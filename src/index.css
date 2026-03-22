@@ -1,0 +1,110 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* BAG-INVENT Design System - Dark Dashboard Theme */
+
+@layer base {
+  :root {
+    --background: 220 20% 7%;
+    --foreground: 0 0% 98%;
+
+    --card: 220 18% 10%;
+    --card-foreground: 0 0% 98%;
+
+    --popover: 220 18% 12%;
+    --popover-foreground: 0 0% 98%;
+
+    --primary: 0 85% 50%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 15% 18%;
+    --secondary-foreground: 0 0% 90%;
+
+    --muted: 220 15% 15%;
+    --muted-foreground: 220 10% 55%;
+
+    --accent: 220 15% 20%;
+    --accent-foreground: 0 0% 98%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 142 76% 36%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 0%;
+
+    --border: 220 15% 18%;
+    --input: 220 15% 18%;
+    --ring: 0 85% 50%;
+
+    --radius: 0.5rem;
+
+    --sidebar-background: 220 20% 6%;
+    --sidebar-foreground: 220 10% 60%;
+    --sidebar-primary: 0 85% 50%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 0 85% 50%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 220 15% 12%;
+    --sidebar-ring: 0 85% 50%;
+    --sidebar-muted: 220 15% 25%;
+
+    --chart-1: 0 85% 50%;
+    --chart-2: 220 70% 50%;
+    --chart-3: 142 76% 36%;
+    --chart-4: 38 92% 50%;
+    --chart-5: 280 65% 60%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+}
+
+@layer utilities {
+  .glass-card {
+    @apply bg-card/80 backdrop-blur-sm border border-border/50;
+  }
+  
+  .stat-card {
+    @apply bg-card rounded-xl p-5 border border-border/50 transition-all duration-200 hover:border-primary/30;
+  }
+  
+  .nav-item {
+    @apply flex items-center gap-3 px-4 py-3 rounded-lg text-sidebar-foreground transition-all duration-200 hover:bg-sidebar-muted/50;
+  }
+  
+  .nav-item-active {
+    @apply bg-primary text-primary-foreground hover:bg-primary;
+  }
+  
+  .chart-container {
+    @apply bg-card rounded-xl p-6 border border-border/50;
+  }
+  
+  .insight-card {
+    @apply bg-secondary/50 rounded-lg p-4 border border-border/30;
+  }
+  
+  .status-low {
+    @apply text-destructive bg-destructive/10 px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+  
+  .status-normal {
+    @apply text-success bg-success/10 px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+  
+  .status-warning {
+    @apply text-warning bg-warning/10 px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+}

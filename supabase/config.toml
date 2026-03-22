@@ -1,0 +1,18 @@
+project_id = "nskvusbzohkxgplvkhvx"
+
+[functions.send-otp]
+verify_jwt = false
+
+[functions.verify-otp]
+verify_jwt = false
+
+[functions.signup-with-otp]
+verify_jwt = false
+
+[auth.email]
+otp_length = 8
+otp_expiry = 300
+
+[auth.email.template.magic_link]
+subject = "Your verification code"
+content_path = "./supabase/templates/otp.html"
