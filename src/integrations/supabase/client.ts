@@ -2,8 +2,36 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+const rawSupabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim() ?? '';
+const rawSupabasePublishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY?.trim() ?? '';
+
+const supabaseConfigIssues: string[] = [];
+
+if (!rawSupabaseUrl) {
+  supabaseConfigIssues.push('Missing VITE_SUPABASE_URL');
+} else {
+  try {
+    new URL(rawSupabaseUrl);
+  } catch {
+    supabaseConfigIssues.push('VITE_SUPABASE_URL is not a valid URL');
+  }
+}
+
+if (!rawSupabasePublishableKey) {
+  supabaseConfigIssues.push('Missing VITE_SUPABASE_PUBLISHABLE_KEY');
+}
+
+export const isSupabaseConfigured = supabaseConfigIssues.length === 0;
+export const supabaseConfigurationMessage = isSupabaseConfigured
+  ? null
+  : `BagInvent is missing its Supabase environment variables. ${supabaseConfigIssues.join('. ')}.`;
+
+const SUPABASE_URL = isSupabaseConfigured
+  ? rawSupabaseUrl
+  : 'https://placeholder.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY = isSupabaseConfigured
+  ? rawSupabasePublishableKey
+  : 'placeholder-publishable-key';
 
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
