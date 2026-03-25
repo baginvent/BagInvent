@@ -1,7 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import { AlertTriangle, Clock, Package, TrendingUp } from "lucide-react";
 import type { Tables } from "@/integrations/supabase/types";
-import { demoTransactions } from "@/lib/demoData";
+import { getMockTransactions } from "@/lib/demoData";
 
 type Product = Tables<"products">;
 type Transaction = Tables<"transactions">;
@@ -98,20 +98,7 @@ const getDaysUntil = (date: string) => {
 const getDayName = (date: string) =>
   new Date(date).toLocaleDateString("en-US", { weekday: "long" });
 
-export const buildMockTransactions = (userId: string): Transaction[] =>
-  demoTransactions.map((transaction, index) => ({
-    amount: transaction.amount,
-    created_at: `${transaction.date}T${String(10 + (index % 6)).padStart(2, "0")}:00:00.000Z`,
-    date: transaction.date,
-    id: `mock-forecast-transaction-${index + 1}`,
-    product_id: null,
-    product_name: transaction.product_name,
-    quantity: transaction.quantity,
-    reference: transaction.reference,
-    type: transaction.type,
-    updated_at: `${transaction.date}T${String(10 + (index % 6)).padStart(2, "0")}:00:00.000Z`,
-    user_id: userId,
-  }));
+export const buildMockTransactions = (userId: string): Transaction[] => getMockTransactions(userId);
 
 export const mapTransactionsToForecastData = (
   products: Product[],

@@ -2,6 +2,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Tables, TablesInsert } from "@/integrations/supabase/types";
 
 type ProductSeed = Omit<TablesInsert<"products">, "status" | "user_id">;
+type Transaction = Tables<"transactions">;
 type TransactionSeed = {
   amount: number;
   date: string;
@@ -10,6 +11,18 @@ type TransactionSeed = {
   reference: string;
   type: "incoming" | "sale";
 };
+type MockTransactionInput = {
+  amount: number;
+  date: string;
+  productId: string | null;
+  productName: string;
+  quantity: number;
+  reference: string;
+  type: Transaction["type"];
+  userId: string;
+};
+
+const MOCK_TRANSACTIONS_STORAGE_PREFIX = "baginvent:mock-transactions:";
 
 export const demoProducts: ProductSeed[] = [
   {
@@ -137,6 +150,105 @@ export const getStatusFromQuantity = (quantity: number) => {
 
 const mapProductsByName = (products: Pick<Tables<"products">, "id" | "name">[]) =>
   new Map(products.map((product) => [product.name, product.id]));
+
+const sortTransactionsNewestFirst = (left: Transaction, right: Transaction) =>
+  right.date.localeCompare(left.date) || right.created_at.localeCompare(left.created_at);
+
+const getMockTransactionsStorageKey = (userId: string) =>
+  `${MOCK_TRANSACTIONS_STORAGE_PREFIX}${userId}`;
+
+const readStoredMockTransactions = (userId: string): Transaction[] => {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const storedValue = window.localStorage.getItem(getMockTransactionsStorageKey(userId));
+
+    if (!storedValue) {
+      return [];
+    }
+
+    const parsedValue = JSON.parse(storedValue);
+    return Array.isArray(parsedValue) ? (parsedValue as Transaction[]) : [];
+  } catch {
+    return [];
+  }
+};
+
+const writeStoredMockTransactions = (userId: string, transactions: Transaction[]) => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(
+    getMockTransactionsStorageKey(userId),
+    JSON.stringify(transactions.sort(sortTransactionsNewestFirst)),
+  );
+};
+
+const buildSeedTransaction = (transaction: TransactionSeed, index: number, userId: string): Transaction => {
+  const createdAt = `${transaction.date}T${String(10 + (index % 6)).padStart(2, "0")}:00:00.000Z`;
+
+  return {
+    amount: transaction.amount,
+    created_at: createdAt,
+    date: transaction.date,
+    id: `mock-transaction-${index + 1}`,
+    product_id: null,
+    product_name: transaction.product_name,
+    quantity: transaction.quantity,
+    reference: transaction.reference,
+    type: transaction.type,
+    updated_at: createdAt,
+    user_id: userId,
+  };
+};
+
+const buildMockTimestamp = (date: string) => {
+  const timeFragment = new Date().toISOString().split("T")[1] ?? "00:00:00.000Z";
+  return `${date}T${timeFragment}`;
+};
+
+const generateMockTransactionId = () =>
+  typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? `mock-user-transaction-${crypto.randomUUID()}`
+    : `mock-user-transaction-${Date.now()}`;
+
+export const getMockTransactions = (userId: string): Transaction[] =>
+  [...demoTransactions.map((transaction, index) => buildSeedTransaction(transaction, index, userId)), ...readStoredMockTransactions(userId)].sort(
+    sortTransactionsNewestFirst,
+  );
+
+export const addMockTransaction = ({
+  amount,
+  date,
+  productId,
+  productName,
+  quantity,
+  reference,
+  type,
+  userId,
+}: MockTransactionInput): Transaction => {
+  const timestamp = buildMockTimestamp(date);
+  const nextTransaction: Transaction = {
+    amount,
+    created_at: timestamp,
+    date,
+    id: generateMockTransactionId(),
+    product_id: productId,
+    product_name: productName,
+    quantity,
+    reference,
+    type,
+    updated_at: timestamp,
+    user_id: userId,
+  };
+
+  writeStoredMockTransactions(userId, [...readStoredMockTransactions(userId), nextTransaction]);
+
+  return nextTransaction;
+};
 
 export const isMissingTransactionsTableError = (error: unknown) => {
   if (!error || typeof error !== "object") {

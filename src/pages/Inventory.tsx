@@ -1,7 +1,6 @@
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
-import { useEffect, useMemo, useState } from "react";
-import { Search, Plus, Edit2, Trash2, Filter, Loader2, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Fragment, useEffect, useMemo, useState } from "react";
+import { Search, Filter, Loader2, ChevronDown, ChevronRight } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
   Table,
@@ -18,39 +17,46 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
 import { useAuthContext } from "@/contexts/AuthContext";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ensureDemoInventoryAndTransactions, getStatusFromQuantity } from "@/lib/demoData";
 
 type Product = Tables<"products">;
-
-const defaultForm = {
-  category: "Uncategorized",
-  expiry_date: "",
-  name: "",
-  quantity: 0,
+type ProductGroup = {
+  batchCount: number;
+  category: string;
+  earliestExpiry: string | null;
+  key: string;
+  name: string;
+  products: Product[];
+  totalQuantity: number;
 };
+
+const getProductGroupKey = (product: Pick<Product, "category" | "name">) =>
+  `${product.name.trim().toLowerCase()}::${product.category.trim().toLowerCase()}`;
+
+const getProductExpirySortValue = (product: Product) => {
+  if (!product.expiry_date) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  const value = new Date(`${product.expiry_date}T00:00:00.000Z`).getTime();
+  return Number.isNaN(value) ? Number.POSITIVE_INFINITY : value;
+};
+
+const sortProductsByBatch = (left: Product, right: Product) =>
+  getProductExpirySortValue(left) - getProductExpirySortValue(right) ||
+  new Date(left.created_at).getTime() - new Date(right.created_at).getTime() ||
+  left.id.localeCompare(right.id);
 
 export default function Inventory() {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All");
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
-  const [customCategories, setCustomCategories] = useState<string[]>([]);
-  const [newCategory, setNewCategory] = useState("");
-  const [form, setForm] = useState(defaultForm);
   const [isSeeding, setIsSeeding] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
 
   const { user } = useAuthContext();
   const queryClient = useQueryClient();
@@ -116,7 +122,7 @@ export default function Inventory() {
   });
 
   const categoryOptions = useMemo(() => {
-    const options = new Set<string>(["Uncategorized"]);
+    const options = new Set<string>();
 
     products.forEach((product) => {
       if (product.category.trim()) {
@@ -124,19 +130,8 @@ export default function Inventory() {
       }
     });
 
-    customCategories.forEach((customCategory) => {
-      if (customCategory.trim()) {
-        options.add(customCategory);
-      }
-    });
-
     return ["All", ...Array.from(options).sort((left, right) => left.localeCompare(right))];
-  }, [customCategories, products]);
-
-  const formCategoryOptions = useMemo(
-    () => categoryOptions.filter((option) => option !== "All"),
-    [categoryOptions],
-  );
+  }, [products]);
 
   const filteredProducts = useMemo(
     () =>
@@ -148,137 +143,54 @@ export default function Inventory() {
     [category, products, search],
   );
 
-  const addMutation = useMutation({
-    mutationFn: async (product: typeof defaultForm) => {
-      const { error } = await supabase.from("products").insert({
+  const groupedProducts = useMemo<ProductGroup[]>(() => {
+    const groups = new Map<string, ProductGroup>();
+
+    filteredProducts.forEach((product) => {
+      const key = getProductGroupKey(product);
+      const existingGroup = groups.get(key);
+
+      if (existingGroup) {
+        existingGroup.products.push(product);
+        existingGroup.totalQuantity += product.quantity;
+        existingGroup.batchCount += 1;
+        return;
+      }
+
+      groups.set(key, {
+        batchCount: 1,
         category: product.category,
-        expiry_date: product.expiry_date || null,
-        name: product.name.trim(),
-        quantity: product.quantity,
-        status: getStatusFromQuantity(product.quantity),
-        user_id: user!.id,
+        earliestExpiry: product.expiry_date,
+        key,
+        name: product.name,
+        products: [product],
+        totalQuantity: product.quantity,
       });
-
-      if (error) {
-        throw error;
-      }
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["products", user?.id] });
-      toast.success("Product added successfully");
-      resetForm();
-    },
-    onError: (error: unknown) => {
-      toast.error(error instanceof Error ? error.message : "Failed to add product");
-    },
-  });
-
-  const updateMutation = useMutation({
-    mutationFn: async (product: typeof defaultForm & { id: string }) => {
-      const { error } = await supabase
-        .from("products")
-        .update({
-          category: product.category,
-          expiry_date: product.expiry_date || null,
-          name: product.name.trim(),
-          quantity: product.quantity,
-          status: getStatusFromQuantity(product.quantity),
-        })
-        .eq("id", product.id);
-
-      if (error) {
-        throw error;
-      }
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["products", user?.id] });
-      toast.success("Product updated");
-      resetForm();
-    },
-    onError: (error: unknown) => {
-      toast.error(error instanceof Error ? error.message : "Failed to update product");
-    },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from("products").delete().eq("id", id);
-
-      if (error) {
-        throw error;
-      }
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["products", user?.id] });
-      toast.success("Product deleted");
-    },
-    onError: (error: unknown) => {
-      toast.error(error instanceof Error ? error.message : "Failed to delete product");
-    },
-  });
-
-  const resetForm = () => {
-    setForm(defaultForm);
-    setEditingProduct(null);
-    setDialogOpen(false);
-    setNewCategory("");
-  };
-
-  const addCategory = () => {
-    const trimmedCategory = newCategory.trim();
-
-    if (!trimmedCategory) {
-      return;
-    }
-
-    if (!formCategoryOptions.includes(trimmedCategory)) {
-      setCustomCategories((currentCategories) => [...currentCategories, trimmedCategory]);
-    }
-
-    setForm((currentForm) => ({ ...currentForm, category: trimmedCategory }));
-    setNewCategory("");
-  };
-
-  const removeCategory = (categoryToRemove: string) => {
-    setCustomCategories((currentCategories) =>
-      currentCategories.filter((currentCategory) => currentCategory !== categoryToRemove),
-    );
-
-    if (category === categoryToRemove) {
-      setCategory("All");
-    }
-
-    if (form.category === categoryToRemove) {
-      setForm((currentForm) => ({ ...currentForm, category: "Uncategorized" }));
-    }
-  };
-
-  const handleSubmit = (event: React.FormEvent) => {
-    event.preventDefault();
-
-    if (!form.name.trim()) {
-      toast.error("Product name is required");
-      return;
-    }
-
-    if (editingProduct) {
-      updateMutation.mutate({ id: editingProduct.id, ...form });
-      return;
-    }
-
-    addMutation.mutate(form);
-  };
-
-  const handleEdit = (product: Product) => {
-    setEditingProduct(product);
-    setForm({
-      category: product.category,
-      expiry_date: product.expiry_date || "",
-      name: product.name,
-      quantity: product.quantity,
     });
-    setDialogOpen(true);
-  };
+
+    return Array.from(groups.values())
+      .map((group) => {
+        const sortedProducts = [...group.products].sort(sortProductsByBatch);
+        return {
+          ...group,
+          earliestExpiry: sortedProducts.find((product) => product.expiry_date)?.expiry_date ?? null,
+          products: sortedProducts,
+          totalQuantity: sortedProducts.reduce((sum, product) => sum + product.quantity, 0),
+        };
+      })
+      .sort(
+        (left, right) =>
+          left.name.localeCompare(right.name) || left.category.localeCompare(right.category),
+      );
+  }, [filteredProducts]);
+
+  useEffect(() => {
+    const visibleGroupKeys = new Set(groupedProducts.map((group) => group.key));
+
+    setExpandedGroups((currentGroups) =>
+      currentGroups.filter((groupKey) => visibleGroupKeys.has(groupKey)),
+    );
+  }, [groupedProducts]);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -293,173 +205,48 @@ export default function Inventory() {
     }
   };
 
+  const getGroupStatus = (group: ProductGroup) => {
+    if (group.products.some((product) => product.status === "warning")) {
+      return "warning";
+    }
+
+    return getStatusFromQuantity(group.totalQuantity);
+  };
+
+  const toggleGroup = (groupKey: string) => {
+    setExpandedGroups((currentGroups) =>
+      currentGroups.includes(groupKey)
+        ? currentGroups.filter((currentKey) => currentKey !== groupKey)
+        : [...currentGroups, groupKey],
+    );
+  };
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold text-foreground">Inventory</h1>
-            <p className="text-muted-foreground mt-1">Manage your product stock</p>
-          </div>
-          <Dialog
-            open={dialogOpen}
-            onOpenChange={(open) => {
-              if (!open) {
-                resetForm();
-                return;
-              }
-
-              setDialogOpen(true);
-            }}
-          >
-            <DialogTrigger asChild>
-              <Button className="bg-primary hover:bg-primary/90 text-primary-foreground">
-                <Plus className="w-4 h-4 mr-2" />
-                Add Product
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="bg-card border-border">
-              <DialogHeader>
-                <DialogTitle className="text-foreground">
-                  {editingProduct ? "Edit Product" : "Add Product"}
-                </DialogTitle>
-              </DialogHeader>
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="name">Product Name</Label>
-                  <Input
-                    id="name"
-                    value={form.name}
-                    onChange={(event) => setForm({ ...form, name: event.target.value })}
-                    placeholder="Product name"
-                    className="bg-background border-border"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="category">Category</Label>
-                  <Select
-                    value={form.category}
-                    onValueChange={(value) => setForm({ ...form, category: value })}
-                  >
-                    <SelectTrigger className="bg-background border-border">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="bg-card border-border">
-                      {formCategoryOptions.map((option) => (
-                        <SelectItem key={option} value={option}>
-                          {option}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="newCategory">Add Category</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      id="newCategory"
-                      value={newCategory}
-                      onChange={(event) => setNewCategory(event.target.value)}
-                      placeholder="Enter category name"
-                      className="bg-background border-border"
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          addCategory();
-                        }
-                      }}
-                    />
-                    <Button
-                      type="button"
-                      onClick={addCategory}
-                      className="bg-primary hover:bg-primary/90 text-primary-foreground"
-                    >
-                      Add
-                    </Button>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label>Custom Categories</Label>
-                  {customCategories.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">No custom categories added yet.</p>
-                  ) : (
-                    <div className="flex flex-wrap gap-2">
-                      {customCategories.map((customCategory) => (
-                        <div
-                          key={customCategory}
-                          className="flex items-center gap-1 rounded-md bg-muted px-3 py-1"
-                        >
-                          <span className="text-sm text-foreground">{customCategory}</span>
-                          <button
-                            type="button"
-                            onClick={() => removeCategory(customCategory)}
-                            className="text-muted-foreground transition-colors hover:text-destructive"
-                            aria-label={`Remove ${customCategory}`}
-                          >
-                            <X className="h-3 w-3" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="quantity">Quantity</Label>
-                  <Input
-                    id="quantity"
-                    type="number"
-                    min={0}
-                    value={form.quantity}
-                    onChange={(event) =>
-                      setForm({
-                        ...form,
-                        quantity: Number.parseInt(event.target.value, 10) || 0,
-                      })
-                    }
-                    className="bg-background border-border"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="expiry">Expiry Date</Label>
-                  <Input
-                    id="expiry"
-                    type="date"
-                    value={form.expiry_date}
-                    onChange={(event) => setForm({ ...form, expiry_date: event.target.value })}
-                    className="bg-background border-border text-white [&::-webkit-calendar-picker-indicator]:invert"
-                  />
-                </div>
-                <Button
-                  type="submit"
-                  className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
-                  disabled={addMutation.isPending || updateMutation.isPending}
-                >
-                  {(addMutation.isPending || updateMutation.isPending) && (
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  )}
-                  {editingProduct ? "Update Product" : "Add Product"}
-                </Button>
-              </form>
-            </DialogContent>
-          </Dialog>
+        <div>
+          <h1 className="text-3xl font-bold text-foreground">Inventory</h1>
+          <p className="mt-1 text-muted-foreground">
+            Inventory is driven by incoming and sale transactions.
+          </p>
         </div>
 
-        <div className="flex flex-col md:flex-row gap-4">
+        <div className="flex flex-col gap-4 md:flex-row">
           <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               placeholder="Search products..."
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              className="pl-10 bg-card border-border"
+              className="border-border bg-card pl-10"
             />
           </div>
           <Select value={category} onValueChange={setCategory}>
-            <SelectTrigger className="w-full md:w-48 bg-card border-border">
-              <Filter className="w-4 h-4 mr-2" />
+            <SelectTrigger className="w-full border-border bg-card md:w-48">
+              <Filter className="mr-2 h-4 w-4" />
               <SelectValue placeholder="Category" />
             </SelectTrigger>
-            <SelectContent className="bg-card border-border">
+            <SelectContent className="border-border bg-card">
               {categoryOptions.map((option) => (
                 <SelectItem key={option} value={option}>
                   {option}
@@ -472,7 +259,7 @@ export default function Inventory() {
         <div className="chart-container overflow-hidden">
           {isLoading || isSeeding ? (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
           ) : (
             <Table>
@@ -483,48 +270,100 @@ export default function Inventory() {
                   <TableHead className="text-muted-foreground">Quantity</TableHead>
                   <TableHead className="text-muted-foreground">Expiry Date</TableHead>
                   <TableHead className="text-muted-foreground">Status</TableHead>
-                  <TableHead className="text-muted-foreground text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredProducts.length === 0 ? (
+                {groupedProducts.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
-                      No products found. Add your first product!
+                    <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                      Products will appear here after you record an incoming transaction.
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredProducts.map((product) => (
-                    <TableRow key={product.id} className="border-border hover:bg-muted/30">
-                      <TableCell className="font-medium text-foreground">{product.name}</TableCell>
-                      <TableCell className="text-muted-foreground">{product.category}</TableCell>
-                      <TableCell className="text-foreground">{product.quantity}</TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {product.expiry_date || "-"}
-                      </TableCell>
-                      <TableCell>{getStatusBadge(product.status)}</TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                            onClick={() => handleEdit(product)}
-                          >
-                            <Edit2 className="w-4 h-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                            onClick={() => deleteMutation.mutate(product.id)}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))
+                  groupedProducts.map((group) => {
+                    const isExpanded = expandedGroups.includes(group.key);
+                    const hasMultipleBatches = group.batchCount > 1;
+                    const singleProduct = group.products[0];
+
+                    return (
+                      <Fragment key={group.key}>
+                        <TableRow className="border-border hover:bg-muted/30">
+                          <TableCell className="font-medium text-foreground">
+                            <div className="flex items-start gap-2">
+                              {hasMultipleBatches ? (
+                                <button
+                                  type="button"
+                                  onClick={() => toggleGroup(group.key)}
+                                  className="mt-0.5 rounded-sm p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+                                  aria-expanded={isExpanded}
+                                  aria-label={`${isExpanded ? "Hide" : "Show"} batches for ${group.name}`}
+                                >
+                                  {isExpanded ? (
+                                    <ChevronDown className="h-4 w-4" />
+                                  ) : (
+                                    <ChevronRight className="h-4 w-4" />
+                                  )}
+                                </button>
+                              ) : (
+                                <span className="mt-0.5 h-4 w-4" />
+                              )}
+                              <div>
+                                <p className="font-medium text-foreground">{group.name}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {hasMultipleBatches ? `${group.batchCount} stock batches` : "Single batch"}
+                                </p>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">{group.category}</TableCell>
+                          <TableCell className="text-foreground">{group.totalQuantity}</TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {hasMultipleBatches ? (
+                              <div className="space-y-1">
+                                <p>{group.earliestExpiry || "-"}</p>
+                                <p className="text-xs text-muted-foreground">Earliest expiry</p>
+                              </div>
+                            ) : (
+                              singleProduct.expiry_date || "-"
+                            )}
+                          </TableCell>
+                          <TableCell>{getStatusBadge(getGroupStatus(group))}</TableCell>
+                        </TableRow>
+                        {hasMultipleBatches && isExpanded && (
+                          <TableRow className="border-border bg-muted/10 hover:bg-muted/10">
+                            <TableCell colSpan={5} className="px-4 py-4">
+                              <div className="rounded-lg border border-border/60 bg-background/60 p-4">
+                                <div className="mb-3 grid grid-cols-1 gap-2 text-xs uppercase tracking-wide text-muted-foreground md:grid-cols-[1.8fr_1fr_1fr]">
+                                  <span>Batch</span>
+                                  <span>Expiry Date</span>
+                                  <span>Stock</span>
+                                </div>
+                                <div className="space-y-3">
+                                  {group.products.map((product, index) => (
+                                    <div
+                                      key={product.id}
+                                      className="grid grid-cols-1 gap-3 rounded-md border border-border/60 bg-card/70 p-3 md:grid-cols-[1.8fr_1fr_1fr] md:items-center"
+                                    >
+                                      <div>
+                                        <p className="text-sm font-medium text-foreground">
+                                          Batch {index + 1}
+                                        </p>
+                                        <div className="mt-1">{getStatusBadge(product.status)}</div>
+                                      </div>
+                                      <p className="text-sm text-muted-foreground">
+                                        {product.expiry_date || "-"}
+                                      </p>
+                                      <p className="text-sm text-foreground">{product.quantity}</p>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </Fragment>
+                    );
+                  })
                 )}
               </TableBody>
             </Table>
