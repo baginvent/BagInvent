@@ -1,7 +1,26 @@
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { Search, Filter, Loader2, ChevronDown, ChevronRight } from "lucide-react";
+import {
+  AlertTriangle,
+  ChevronDown,
+  ChevronRight,
+  Filter,
+  Loader2,
+  Search,
+  Trash2,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Table,
   TableBody,
@@ -20,9 +39,13 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
 import { useAuthContext } from "@/contexts/AuthContext";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ensureDemoInventoryAndTransactions, getStatusFromQuantity } from "@/lib/demoData";
+import {
+  ensureDemoInventoryAndTransactions,
+  getStatusFromQuantity,
+  isMissingTransactionsTableError,
+} from "@/lib/demoData";
 
 type Product = Tables<"products">;
 type ProductGroup = {
@@ -52,14 +75,24 @@ const sortProductsByBatch = (left: Product, right: Product) =>
   new Date(left.created_at).getTime() - new Date(right.created_at).getTime() ||
   left.id.localeCompare(right.id);
 
+const getTodayDateKey = () =>
+  new Date(new Date().getTime() - new Date().getTimezoneOffset() * 60000)
+    .toISOString()
+    .split("T")[0];
+
+const isExpiredProduct = (product: Product, todayDateKey: string) =>
+  Boolean(product.expiry_date && product.expiry_date < todayDateKey);
+
 export default function Inventory() {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All");
   const [isSeeding, setIsSeeding] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
+  const [productPendingDelete, setProductPendingDelete] = useState<Product | null>(null);
 
   const { user } = useAuthContext();
   const queryClient = useQueryClient();
+  const todayDateKey = getTodayDateKey();
 
   useEffect(() => {
     if (!user) {
@@ -143,10 +176,23 @@ export default function Inventory() {
     [category, products, search],
   );
 
+  const expiredProducts = useMemo(
+    () =>
+      filteredProducts
+        .filter((product) => isExpiredProduct(product, todayDateKey))
+        .sort(sortProductsByBatch),
+    [filteredProducts, todayDateKey],
+  );
+
+  const activeProducts = useMemo(
+    () => filteredProducts.filter((product) => !isExpiredProduct(product, todayDateKey)),
+    [filteredProducts, todayDateKey],
+  );
+
   const groupedProducts = useMemo<ProductGroup[]>(() => {
     const groups = new Map<string, ProductGroup>();
 
-    filteredProducts.forEach((product) => {
+    activeProducts.forEach((product) => {
       const key = getProductGroupKey(product);
       const existingGroup = groups.get(key);
 
@@ -182,7 +228,7 @@ export default function Inventory() {
         (left, right) =>
           left.name.localeCompare(right.name) || left.category.localeCompare(right.category),
       );
-  }, [filteredProducts]);
+  }, [activeProducts]);
 
   useEffect(() => {
     const visibleGroupKeys = new Set(groupedProducts.map((group) => group.key));
@@ -219,6 +265,62 @@ export default function Inventory() {
         ? currentGroups.filter((currentKey) => currentKey !== groupKey)
         : [...currentGroups, groupKey],
     );
+  };
+
+  const deleteExpiredProductMutation = useMutation({
+    mutationFn: async (product: Product) => {
+      if (!user) {
+        throw new Error("You must be signed in to delete inventory.");
+      }
+
+      const { error: detachTransactionsError } = await supabase
+        .from("transactions")
+        .update({ product_id: null })
+        .eq("product_id", product.id)
+        .eq("user_id", user.id);
+
+      if (detachTransactionsError && !isMissingTransactionsTableError(detachTransactionsError)) {
+        throw detachTransactionsError;
+      }
+
+      const { error: deleteError } = await supabase
+        .from("products")
+        .delete()
+        .eq("id", product.id)
+        .eq("user_id", user.id);
+
+      if (deleteError) {
+        throw deleteError;
+      }
+
+      return product;
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to delete expired product.");
+    },
+    onSuccess: (deletedProduct) => {
+      setProductPendingDelete(null);
+      toast.success(`Deleted expired batch for ${deletedProduct.name}.`);
+      queryClient.invalidateQueries({ queryKey: ["products", user?.id] });
+      queryClient.invalidateQueries({ queryKey: ["transactions", user?.id] });
+    },
+  });
+
+  const expiredUnits = useMemo(
+    () => expiredProducts.reduce((total, product) => total + product.quantity, 0),
+    [expiredProducts],
+  );
+
+  const getActiveInventoryEmptyState = () => {
+    if (products.length === 0) {
+      return "Products will appear here after you record an incoming transaction.";
+    }
+
+    if (filteredProducts.length === 0) {
+      return "No inventory matches the current search or category filter.";
+    }
+
+    return "No active inventory matches the current filters. Expired batches are listed below.";
   };
 
   return (
@@ -276,7 +378,7 @@ export default function Inventory() {
                 {groupedProducts.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
-                      Products will appear here after you record an incoming transaction.
+                      {getActiveInventoryEmptyState()}
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -369,7 +471,124 @@ export default function Inventory() {
             </Table>
           )}
         </div>
+
+        <div className="chart-container overflow-hidden border-destructive/20">
+          <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-destructive" />
+                <h2 className="text-xl font-semibold text-foreground">Expired Products</h2>
+              </div>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Remove expired batches from inventory while keeping transaction history.
+              </p>
+            </div>
+            <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm">
+              <p className="font-medium text-foreground">{expiredProducts.length} expired batches</p>
+              <p className="text-muted-foreground">{expiredUnits} units marked expired</p>
+            </div>
+          </div>
+
+          {isLoading || isSeeding ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow className="border-border hover:bg-transparent">
+                  <TableHead className="text-muted-foreground">Product Name</TableHead>
+                  <TableHead className="text-muted-foreground">Category</TableHead>
+                  <TableHead className="text-muted-foreground">Quantity</TableHead>
+                  <TableHead className="text-muted-foreground">Expired On</TableHead>
+                  <TableHead className="text-muted-foreground">Status</TableHead>
+                  <TableHead className="text-right text-muted-foreground">Action</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {expiredProducts.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+                      No expired products match the current filters.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  expiredProducts.map((product) => (
+                    <TableRow key={product.id} className="border-border hover:bg-muted/30">
+                      <TableCell className="font-medium text-foreground">{product.name}</TableCell>
+                      <TableCell className="text-muted-foreground">{product.category}</TableCell>
+                      <TableCell className="text-foreground">{product.quantity}</TableCell>
+                      <TableCell className="text-muted-foreground">{product.expiry_date}</TableCell>
+                      <TableCell>
+                        <span className="status-low">Expired</span>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => setProductPendingDelete(product)}
+                          disabled={deleteExpiredProductMutation.isPending}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          Delete
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          )}
+        </div>
       </div>
+
+      <AlertDialog
+        open={Boolean(productPendingDelete)}
+        onOpenChange={(open) => {
+          if (!open && !deleteExpiredProductMutation.isPending) {
+            setProductPendingDelete(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete expired product?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {productPendingDelete
+                ? `This will permanently remove the expired ${productPendingDelete.name} batch from inventory. Linked transactions will be kept, but detached from this product record.`
+                : "This action cannot be undone."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteExpiredProductMutation.isPending}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={!productPendingDelete || deleteExpiredProductMutation.isPending}
+              onClick={(event) => {
+                event.preventDefault();
+
+                if (!productPendingDelete) {
+                  return;
+                }
+
+                deleteExpiredProductMutation.mutate(productPendingDelete);
+              }}
+            >
+              {deleteExpiredProductMutation.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                "Delete batch"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </DashboardLayout>
   );
 }
