@@ -57,6 +57,49 @@ export type ForecastPoint = {
   predicted: number;
 };
 
+export type DemandLevel = "High demand" | "Medium demand" | "Low demand";
+export type StockDecision = "Increase stock" | "Maintain stock" | "Reduce stock";
+export type ForecastConfidence = "high" | "medium" | "low";
+
+export type ProductDemandForecast = {
+  anomaly: string | null;
+  category: string;
+  confidence: ForecastConfidence;
+  currentInventory: number | null;
+  demandLevel: DemandLevel;
+  forecastDailyAverage: number;
+  forecastNextPeriod: number;
+  historicalDailyAverage: number;
+  inventoryCoverageDays: number | null;
+  productId: string;
+  productName: string;
+  reasoning: string;
+  saleDaysObserved: number;
+  stockDecision: StockDecision;
+  trendPct: number;
+};
+
+export type ProductPurchaseRecommendation = {
+  category: string;
+  confidence: ForecastConfidence;
+  coverageDays: number | null;
+  currentInventory: number | null;
+  forecastNextPeriod: number;
+  productName: string;
+  reason: string;
+  score: number;
+};
+
+export type DemandPlanningResult = {
+  assumptions: string[];
+  buyLess: ProductPurchaseRecommendation[];
+  buyMore: ProductPurchaseRecommendation[];
+  insights: string[];
+  methodology: string[];
+  periodDays: number;
+  productForecasts: ProductDemandForecast[];
+};
+
 export const TODAY = new Date();
 
 export const toDateInputValue = (value: Date) =>
@@ -67,6 +110,106 @@ export const formatCurrency = (value: number) =>
     currency: "PHP",
     style: "currency",
   }).format(value);
+
+const roundTo = (value: number, digits = 1) => {
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+};
+
+const clamp = (value: number, min: number, max: number) =>
+  Math.min(Math.max(value, min), max);
+
+const average = (values: number[]) =>
+  values.length === 0 ? 0 : values.reduce((sum, value) => sum + value, 0) / values.length;
+
+const percentile = (values: number[], fraction: number) => {
+  if (values.length === 0) {
+    return 0;
+  }
+
+  const sortedValues = [...values].sort((left, right) => left - right);
+  const position = (sortedValues.length - 1) * fraction;
+  const lowerIndex = Math.floor(position);
+  const upperIndex = Math.ceil(position);
+  const weight = position - lowerIndex;
+
+  if (lowerIndex === upperIndex) {
+    return sortedValues[lowerIndex];
+  }
+
+  return (
+    sortedValues[lowerIndex] * (1 - weight) + sortedValues[upperIndex] * weight
+  );
+};
+
+const getDateKey = (date: Date) =>
+  new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().split("T")[0];
+
+const addDays = (date: Date, days: number) => {
+  const nextDate = new Date(date);
+  nextDate.setDate(nextDate.getDate() + days);
+  return nextDate;
+};
+
+const getAnalysisAnchorDate = (transactions: ForecastTransaction[]) => {
+  const latestTransactionDate = transactions
+    .map((transaction) => new Date(`${transaction.date}T00:00:00`))
+    .sort((left, right) => right.getTime() - left.getTime())[0];
+
+  return latestTransactionDate ?? TODAY;
+};
+
+const buildWindowDates = (endDate: Date, windowDays: number) =>
+  Array.from({ length: windowDays }, (_, index) => addDays(endDate, -(windowDays - 1 - index)));
+
+const getConfidence = (saleDaysObserved: number, historyDays: number): ForecastConfidence => {
+  if (saleDaysObserved >= 5 && historyDays >= 21) {
+    return "high";
+  }
+
+  if (saleDaysObserved >= 2 && historyDays >= 10) {
+    return "medium";
+  }
+
+  return "low";
+};
+
+const getDemandLevel = ({
+  forecast,
+  highThreshold,
+  lowThreshold,
+  saleDaysObserved,
+}: {
+  forecast: number;
+  highThreshold: number;
+  lowThreshold: number;
+  saleDaysObserved: number;
+}): DemandLevel => {
+  if (forecast <= 1 && saleDaysObserved <= 1) {
+    return "Low demand";
+  }
+
+  if (forecast >= highThreshold && forecast > 0) {
+    return "High demand";
+  }
+
+  if (forecast <= lowThreshold) {
+    return "Low demand";
+  }
+
+  return "Medium demand";
+};
+
+const getStockDecision = (demandLevel: DemandLevel): StockDecision => {
+  switch (demandLevel) {
+    case "High demand":
+      return "Increase stock";
+    case "Low demand":
+      return "Reduce stock";
+    default:
+      return "Maintain stock";
+  }
+};
 
 const formatHourRange = (hour: number) => {
   const start = new Date();
@@ -244,6 +387,335 @@ export function generateForecastData(data: ForecastTransaction[], growth: number
       predicted: Math.max(0, predicted),
     };
   });
+}
+
+export function buildDemandPlanningResult(args: {
+  periodDays?: number;
+  products: Product[];
+  transactions: ForecastTransaction[];
+}): DemandPlanningResult {
+  const { products, transactions } = args;
+  const periodDays = args.periodDays ?? 7;
+  const saleTransactions = transactions.filter((transaction) => transaction.type === "sale");
+  const anchorDate = getAnalysisAnchorDate(saleTransactions);
+
+  const rawForecasts = products.map((product) => {
+    const productSales = saleTransactions.filter(
+      (transaction) => transaction.product_name === product.name,
+    );
+
+    const earliestSaleDate =
+      productSales.length > 0
+        ? productSales
+            .map((transaction) => new Date(`${transaction.date}T00:00:00`))
+            .sort((left, right) => left.getTime() - right.getTime())[0]
+        : null;
+
+    const historyDays = earliestSaleDate
+      ? clamp(
+          Math.round((anchorDate.getTime() - earliestSaleDate.getTime()) / 86400000) + 1,
+          7,
+          28,
+        )
+      : 7;
+
+    const windowDates = buildWindowDates(anchorDate, historyDays);
+    const dailyDemand = new Map<string, number>();
+
+    productSales.forEach((transaction) => {
+      dailyDemand.set(
+        transaction.date,
+        (dailyDemand.get(transaction.date) ?? 0) + transaction.quantity,
+      );
+    });
+
+    const datedSeries = windowDates.map((date) => {
+      const key = getDateKey(date);
+
+      return {
+        date,
+        quantity: dailyDemand.get(key) ?? 0,
+      };
+    });
+
+    const series = datedSeries.map((entry) => entry.quantity);
+    const shortWindow = Math.min(7, series.length);
+    const recentSeries = series.slice(-shortWindow);
+    const priorSeries = series.slice(-shortWindow * 2, -shortWindow);
+    const recentAverage = average(recentSeries);
+    const historicalAverage = average(series);
+    const previousAverage = average(priorSeries);
+
+    const trendPct =
+      priorSeries.length > 0 && previousAverage > 0
+        ? roundTo(((recentAverage - previousAverage) / previousAverage) * 100, 1)
+        : recentAverage > 0
+          ? 100
+          : 0;
+
+    const trendFactor =
+      priorSeries.length > 0 && previousAverage > 0
+        ? clamp(1 + (trendPct / 100) * 0.35, 0.75, 1.35)
+        : 1;
+
+    const baseDailyForecast =
+      recentAverage === 0 && historicalAverage === 0
+        ? 0
+        : recentAverage * 0.65 + historicalAverage * 0.35;
+
+    const weekdayMultipliers =
+      historicalAverage > 0 && datedSeries.length >= 14
+        ? new Map(
+            Array.from({ length: 7 }, (_, weekday) => {
+              const weekdayValues = datedSeries
+                .filter((entry) => entry.date.getDay() === weekday)
+                .map((entry) => entry.quantity);
+              const weekdayAverage = average(weekdayValues);
+
+              return [weekday, clamp(weekdayAverage / historicalAverage || 1, 0.7, 1.3)] as const;
+            }),
+          )
+        : new Map<number, number>();
+
+    const forecastDays = Array.from({ length: periodDays }, (_, index) => {
+      const forecastDate = addDays(anchorDate, index + 1);
+      const weekdayMultiplier = weekdayMultipliers.get(forecastDate.getDay()) ?? 1;
+
+      return Math.max(0, baseDailyForecast * trendFactor * weekdayMultiplier);
+    });
+
+    const forecastNextPeriod = roundTo(
+      forecastDays.reduce((sum, value) => sum + value, 0),
+      1,
+    );
+    const forecastDailyAverage =
+      periodDays > 0 ? roundTo(forecastNextPeriod / periodDays, 2) : 0;
+    const inventoryCoverageDays =
+      forecastDailyAverage > 0 ? roundTo(product.quantity / forecastDailyAverage, 1) : null;
+    const saleDaysObserved = productSales.length;
+    const maxDailyDemand = Math.max(...series, 0);
+    const anomaly =
+      maxDailyDemand >= Math.max(3, historicalAverage * 2.5)
+        ? `A one-day spike of ${maxDailyDemand} units suggests promo or event-driven demand.`
+        : null;
+
+    const confidence = getConfidence(saleDaysObserved, historyDays);
+    const reasoningParts: string[] = [];
+
+    if (saleDaysObserved === 0) {
+      reasoningParts.push(
+        "No direct sales history is available, so the forecast stays conservative until more data is captured.",
+      );
+    } else {
+      reasoningParts.push(
+        `Weighted moving average uses ${roundTo(recentAverage, 1)} recent units/day and ${roundTo(
+          historicalAverage,
+          1,
+        )} baseline units/day.`,
+      );
+
+      if (Math.abs(trendPct) >= 10) {
+        reasoningParts.push(
+          `Recent demand is ${trendPct >= 0 ? "up" : "down"} ${Math.abs(trendPct)}% versus the prior comparable window.`,
+        );
+      }
+
+      if (inventoryCoverageDays !== null) {
+        reasoningParts.push(
+          `Current stock covers about ${inventoryCoverageDays} days at the projected run rate.`,
+        );
+      }
+    }
+
+    if (anomaly) {
+      reasoningParts.push(anomaly);
+    }
+
+    return {
+      anomaly,
+      category: product.category,
+      confidence,
+      currentInventory: product.quantity,
+      forecastDailyAverage,
+      forecastNextPeriod,
+      historicalDailyAverage: roundTo(historicalAverage, 2),
+      inventoryCoverageDays,
+      productId: product.id,
+      productName: product.name,
+      reasoning: reasoningParts.join(" "),
+      saleDaysObserved,
+      trendPct,
+    };
+  });
+
+  const forecastValues = rawForecasts.map((item) => item.forecastNextPeriod);
+  const highThreshold = percentile(forecastValues, 0.67);
+  const lowThreshold = percentile(forecastValues, 0.33);
+
+  const productForecasts: ProductDemandForecast[] = rawForecasts
+    .map((forecast) => {
+      const demandLevel = getDemandLevel({
+        forecast: forecast.forecastNextPeriod,
+        highThreshold,
+        lowThreshold,
+        saleDaysObserved: forecast.saleDaysObserved,
+      });
+
+      return {
+        ...forecast,
+        demandLevel,
+        stockDecision: getStockDecision(demandLevel),
+      };
+    })
+    .sort(
+      (left, right) =>
+        right.forecastNextPeriod - left.forecastNextPeriod ||
+        right.trendPct - left.trendPct ||
+        left.productName.localeCompare(right.productName),
+    );
+
+  const buyMore = productForecasts
+    .filter(
+      (forecast) =>
+        forecast.stockDecision === "Increase stock" ||
+        (forecast.inventoryCoverageDays !== null && forecast.inventoryCoverageDays <= periodDays),
+    )
+    .map((forecast) => {
+      const shortagePressure =
+        forecast.inventoryCoverageDays === null
+          ? 0
+          : Math.max(0, periodDays * 1.5 - forecast.inventoryCoverageDays);
+      const score = roundTo(
+        forecast.forecastNextPeriod * 1.5 +
+          shortagePressure * 4 +
+          Math.max(0, forecast.trendPct),
+        1,
+      );
+
+      return {
+        category: forecast.category,
+        confidence: forecast.confidence,
+        coverageDays: forecast.inventoryCoverageDays,
+        currentInventory: forecast.currentInventory,
+        forecastNextPeriod: forecast.forecastNextPeriod,
+        productName: forecast.productName,
+        reason: `${forecast.productName} is projected at ${forecast.forecastNextPeriod} units for the next ${periodDays} days${forecast.inventoryCoverageDays !== null ? ` with only ${forecast.inventoryCoverageDays} days of stock coverage` : ""}. ${forecast.reasoning}`,
+        score,
+      };
+    })
+    .sort((left, right) => right.score - left.score)
+    .slice(0, 5);
+
+  const buyLess = productForecasts
+    .filter(
+      (forecast) =>
+        forecast.stockDecision === "Reduce stock" ||
+        (forecast.inventoryCoverageDays !== null && forecast.inventoryCoverageDays >= periodDays * 4),
+    )
+    .map((forecast) => {
+      const excessCoverage =
+        forecast.inventoryCoverageDays === null
+          ? 0
+          : Math.max(0, forecast.inventoryCoverageDays - periodDays * 2);
+      const score = roundTo(
+        (highThreshold - forecast.forecastNextPeriod + Math.max(highThreshold, 1)) +
+          excessCoverage * 3 +
+          Math.max(0, -forecast.trendPct),
+        1,
+      );
+
+      return {
+        category: forecast.category,
+        confidence: forecast.confidence,
+        coverageDays: forecast.inventoryCoverageDays,
+        currentInventory: forecast.currentInventory,
+        forecastNextPeriod: forecast.forecastNextPeriod,
+        productName: forecast.productName,
+        reason: `${forecast.productName} is only projected at ${forecast.forecastNextPeriod} units for the next ${periodDays} days${forecast.inventoryCoverageDays !== null ? ` while current stock already covers ${forecast.inventoryCoverageDays} days` : ""}. ${forecast.reasoning}`,
+        score,
+      };
+    })
+    .sort((left, right) => right.score - left.score)
+    .slice(0, 5);
+
+  const categoryForecasts = new Map<string, number>();
+
+  productForecasts.forEach((forecast) => {
+    categoryForecasts.set(
+      forecast.category,
+      (categoryForecasts.get(forecast.category) ?? 0) + forecast.forecastNextPeriod,
+    );
+  });
+
+  const topCategory =
+    [...categoryForecasts.entries()].sort((left, right) => right[1] - left[1])[0] ?? null;
+  const strongestRisers = productForecasts.filter((forecast) => forecast.trendPct >= 15).length;
+  const weakestMovers = productForecasts.filter((forecast) => forecast.trendPct <= -15).length;
+  const lowConfidenceCount = productForecasts.filter(
+    (forecast) => forecast.confidence === "low",
+  ).length;
+  const anomalyProducts = productForecasts.filter((forecast) => forecast.anomaly).map(
+    (forecast) => forecast.productName,
+  );
+
+  const insights: string[] = [];
+
+  if (topCategory) {
+    insights.push(
+      `${topCategory[0]} contributes the largest projected demand with ${roundTo(
+        topCategory[1],
+        1,
+      )} forecast units in the next ${periodDays} days.`,
+    );
+  }
+
+  if (strongestRisers > 0) {
+    insights.push(
+      `${strongestRisers} product${strongestRisers === 1 ? "" : "s"} show accelerating demand with at least 15% recent growth.`,
+    );
+  }
+
+  if (weakestMovers > 0) {
+    insights.push(
+      `${weakestMovers} product${weakestMovers === 1 ? "" : "s"} are slowing by at least 15%, which points to excess stock risk.`,
+    );
+  }
+
+  if (anomalyProducts.length > 0) {
+    insights.push(
+      `Potential anomalies were detected for ${anomalyProducts.slice(0, 3).join(", ")}${anomalyProducts.length > 3 ? ", and others" : ""}.`,
+    );
+  }
+
+  if (lowConfidenceCount > 0) {
+    insights.push(
+      `${lowConfidenceCount} product${lowConfidenceCount === 1 ? "" : "s"} have limited sales history, so their forecasts should be treated as directional.`,
+    );
+  }
+
+  if (insights.length === 0) {
+    insights.push(
+      "Demand is relatively stable across the current assortment, with no major seasonal or anomaly signals in the available history.",
+    );
+  }
+
+  return {
+    assumptions: [
+      `Next period is assumed to be the next ${periodDays} days because no replenishment cycle was provided.`,
+      "The latest sales date in the dataset is used as the forecast anchor when live dates extend beyond the recorded history.",
+      "Products with little or no sales history keep low-confidence forecasts and should be reviewed manually.",
+    ],
+    buyLess,
+    buyMore,
+    insights,
+    methodology: [
+      "Demand is modeled with a weighted moving average that blends recent daily sales with the broader historical baseline.",
+      "A damped trend factor adjusts the base forecast using the difference between the latest window and the previous comparable window.",
+      "Weekday seasonality is applied only when enough history exists to avoid overfitting sparse data.",
+    ],
+    periodDays,
+    productForecasts,
+  };
 }
 
 export const buildWasteAlerts = (products: Product[]): WasteAlert[] =>

@@ -1,14 +1,19 @@
-import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
   ChevronDown,
   ChevronRight,
+  Download,
   Filter,
   Loader2,
+  Plus,
   Search,
   Trash2,
 } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { StatCard } from "@/components/dashboard/StatCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -39,15 +44,16 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
 import { useAuthContext } from "@/contexts/AuthContext";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   ensureDemoInventoryAndTransactions,
   getStatusFromQuantity,
   isMissingTransactionsTableError,
 } from "@/lib/demoData";
+import { buildMockTransactions, formatCurrency } from "@/lib/forecastInsights";
 
 type Product = Tables<"products">;
+type Transaction = Tables<"transactions">;
 type ProductGroup = {
   batchCount: number;
   category: string;
@@ -57,6 +63,15 @@ type ProductGroup = {
   products: Product[];
   totalQuantity: number;
 };
+
+const PRODUCT_SWATCHES = [
+  "#2d63c8",
+  "#d05454",
+  "#46a36b",
+  "#8b66cf",
+  "#d28c2c",
+  "#3b8787",
+];
 
 const getProductGroupKey = (product: Pick<Product, "category" | "name">) =>
   `${product.name.trim().toLowerCase()}::${product.category.trim().toLowerCase()}`;
@@ -83,7 +98,45 @@ const getTodayDateKey = () =>
 const isExpiredProduct = (product: Product, todayDateKey: string) =>
   Boolean(product.expiry_date && product.expiry_date < todayDateKey);
 
+const getDaysUntil = (expiryDate: string | null) => {
+  if (!expiryDate) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  const expiry = new Date(`${expiryDate}T00:00:00`);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  return Math.round((expiry.getTime() - today.getTime()) / 86400000);
+};
+
+const getProductColor = (name: string) =>
+  PRODUCT_SWATCHES[
+    [...name].reduce((sum, character) => sum + character.charCodeAt(0), 0) %
+      PRODUCT_SWATCHES.length
+  ];
+
+const buildUnitPriceByName = (transactions: Transaction[]) => {
+  const sortedTransactions = [...transactions].sort(
+    (left, right) =>
+      right.date.localeCompare(left.date) || right.created_at.localeCompare(left.created_at),
+  );
+
+  const values = new Map<string, number>();
+
+  sortedTransactions.forEach((transaction) => {
+    if (values.has(transaction.product_name) || transaction.quantity <= 0) {
+      return;
+    }
+
+    values.set(transaction.product_name, transaction.amount / transaction.quantity);
+  });
+
+  return values;
+};
+
 export default function Inventory() {
+  const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All");
   const [isSeeding, setIsSeeding] = useState(false);
@@ -112,7 +165,6 @@ export default function Inventory() {
         }
 
         if (result.seededProducts || result.seededTransactions) {
-          toast.success("Mock inventory and transactions added.");
           queryClient.invalidateQueries({ queryKey: ["products", user.id] });
           queryClient.invalidateQueries({ queryKey: ["transactions", user.id] });
         }
@@ -136,7 +188,7 @@ export default function Inventory() {
     };
   }, [queryClient, user]);
 
-  const { data: products = [], isLoading } = useQuery<Product[]>({
+  const { data: products = [], isLoading: isProductsLoading } = useQuery<Product[]>({
     queryKey: ["products", user?.id],
     enabled: !!user,
     queryFn: async () => {
@@ -153,6 +205,34 @@ export default function Inventory() {
       return data;
     },
   });
+
+  const { data: transactionResult, isLoading: isTransactionsLoading } = useQuery<{
+    items: Transaction[];
+    source: "db" | "mock";
+  }>({
+    queryKey: ["transactions", user?.id],
+    enabled: !!user,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("transactions")
+        .select("*")
+        .eq("user_id", user!.id)
+        .order("date", { ascending: false })
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        if (isMissingTransactionsTableError(error)) {
+          return { items: buildMockTransactions(user!.id), source: "mock" as const };
+        }
+
+        throw error;
+      }
+
+      return { items: data, source: "db" as const };
+    },
+  });
+
+  const transactions = transactionResult?.items ?? [];
 
   const categoryOptions = useMemo(() => {
     const options = new Set<string>();
@@ -217,9 +297,11 @@ export default function Inventory() {
     return Array.from(groups.values())
       .map((group) => {
         const sortedProducts = [...group.products].sort(sortProductsByBatch);
+
         return {
           ...group,
-          earliestExpiry: sortedProducts.find((product) => product.expiry_date)?.expiry_date ?? null,
+          earliestExpiry:
+            sortedProducts.find((product) => product.expiry_date)?.expiry_date ?? null,
           products: sortedProducts,
           totalQuantity: sortedProducts.reduce((sum, product) => sum + product.quantity, 0),
         };
@@ -238,16 +320,24 @@ export default function Inventory() {
     );
   }, [groupedProducts]);
 
+  const toggleGroup = (groupKey: string) => {
+    setExpandedGroups((currentGroups) =>
+      currentGroups.includes(groupKey)
+        ? currentGroups.filter((currentKey) => currentKey !== groupKey)
+        : [...currentGroups, groupKey],
+    );
+  };
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case "low":
         return <span className="status-warning">Low Stock</span>;
       case "out":
-        return <span className="status-low">Out of Stock</span>;
+        return <span className="status-low">Critical Stock</span>;
       case "warning":
-        return <span className="status-warning">Expiring Soon</span>;
+        return <span className="status-low">Expiring Soon</span>;
       default:
-        return <span className="status-normal">Normal</span>;
+        return <span className="status-normal">In Stock</span>;
     }
   };
 
@@ -257,14 +347,6 @@ export default function Inventory() {
     }
 
     return getStatusFromQuantity(group.totalQuantity);
-  };
-
-  const toggleGroup = (groupKey: string) => {
-    setExpandedGroups((currentGroups) =>
-      currentGroups.includes(groupKey)
-        ? currentGroups.filter((currentKey) => currentKey !== groupKey)
-        : [...currentGroups, groupKey],
-    );
   };
 
   const deleteExpiredProductMutation = useMutation({
@@ -306,10 +388,36 @@ export default function Inventory() {
     },
   });
 
+  const unitPriceByName = useMemo(() => buildUnitPriceByName(transactions), [transactions]);
+  const totalUnits = useMemo(
+    () => groupedProducts.reduce((sum, group) => sum + group.totalQuantity, 0),
+    [groupedProducts],
+  );
+  const lowStockGroups = useMemo(
+    () => groupedProducts.filter((group) => getGroupStatus(group) === "low").length,
+    [groupedProducts],
+  );
+  const expiringSoonCount = useMemo(
+    () =>
+      groupedProducts.filter((group) => {
+        const daysUntilExpiry = getDaysUntil(group.earliestExpiry);
+        return Number.isFinite(daysUntilExpiry) && daysUntilExpiry >= 0 && daysUntilExpiry <= 30;
+      }).length,
+    [groupedProducts],
+  );
+  const inventoryValue = useMemo(
+    () =>
+      groupedProducts.reduce(
+        (sum, group) => sum + group.totalQuantity * (unitPriceByName.get(group.name) ?? 0),
+        0,
+      ),
+    [groupedProducts, unitPriceByName],
+  );
   const expiredUnits = useMemo(
     () => expiredProducts.reduce((total, product) => total + product.quantity, 0),
     [expiredProducts],
   );
+  const isLoading = isProductsLoading || isTransactionsLoading || isSeeding;
 
   const getActiveInventoryEmptyState = () => {
     if (products.length === 0) {
@@ -324,31 +432,62 @@ export default function Inventory() {
   };
 
   return (
-    <DashboardLayout>
+    <DashboardLayout pageLabel="Inventory">
       <div className="space-y-6">
-        <div>
-          <h1 className="text-3xl font-bold text-foreground">Inventory</h1>
-          <p className="mt-1 text-muted-foreground">
-            Inventory is driven by incoming and sale transactions.
-          </p>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h1 className="text-[2rem] font-medium text-[#171717]">Inventory Management</h1>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <button className="workspace-action" onClick={() => navigate("/transactions")}>
+              <Plus className="mr-2 h-4 w-4" />
+              Add Item
+            </button>
+            <button className="workspace-action" onClick={() => navigate("/transactions")}>
+              <Download className="mr-2 h-4 w-4" />
+              Export
+            </button>
+          </div>
         </div>
 
-        <div className="flex flex-col gap-4 md:flex-row">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <StatCard title="Total products" value={totalUnits.toLocaleString()} badgeText="12% From last month" />
+          <StatCard
+            title="Low Stock Items"
+            value={lowStockGroups}
+            badgeText="Attention!"
+            variant="warning"
+          />
+          <StatCard
+            title="Expiring Soon"
+            value={expiringSoonCount}
+            badgeText="Alert!"
+            variant="danger"
+          />
+          <StatCard
+            title="Inventory Value"
+            value={formatCurrency(inventoryValue)}
+            badgeText="Estimated value"
+            variant="success"
+          />
+        </div>
+
+        <div className="flex flex-col gap-4 lg:flex-row">
           <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#6e6e6e]" />
             <Input
               placeholder="Search products..."
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              className="border-border bg-card pl-10"
+              className="h-11 rounded-[4px] border-0 bg-[#efebe6] pl-10 text-[#171717] focus-visible:ring-1 focus-visible:ring-[#cf5a5a] focus-visible:ring-offset-0"
             />
           </div>
           <Select value={category} onValueChange={setCategory}>
-            <SelectTrigger className="w-full border-border bg-card md:w-48">
+            <SelectTrigger className="h-11 w-full rounded-[4px] border-0 bg-[#efebe6] text-[#171717] lg:w-[220px]">
               <Filter className="mr-2 h-4 w-4" />
               <SelectValue placeholder="Category" />
             </SelectTrigger>
-            <SelectContent className="border-border bg-card">
+            <SelectContent className="border-[#d9d2c9] bg-[#f7f4ef] text-[#171717]">
               {categoryOptions.map((option) => (
                 <SelectItem key={option} value={option}>
                   {option}
@@ -358,26 +497,28 @@ export default function Inventory() {
           </Select>
         </div>
 
-        <div className="chart-container overflow-hidden">
-          {isLoading || isSeeding ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <div className="workspace-table">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-16">
+              <Loader2 className="h-6 w-6 animate-spin text-[#666]" />
             </div>
           ) : (
             <Table>
               <TableHeader>
-                <TableRow className="border-border hover:bg-transparent">
-                  <TableHead className="text-muted-foreground">Product Name</TableHead>
-                  <TableHead className="text-muted-foreground">Category</TableHead>
-                  <TableHead className="text-muted-foreground">Quantity</TableHead>
-                  <TableHead className="text-muted-foreground">Expiry Date</TableHead>
-                  <TableHead className="text-muted-foreground">Status</TableHead>
+                <TableRow className="border-b border-white/40 hover:bg-transparent">
+                  <TableHead className="text-[#4c4c4c]">Product</TableHead>
+                  <TableHead className="text-[#4c4c4c]">Category</TableHead>
+                  <TableHead className="text-[#4c4c4c]">Stock</TableHead>
+                  <TableHead className="text-[#4c4c4c]">Price</TableHead>
+                  <TableHead className="text-[#4c4c4c]">Expiry</TableHead>
+                  <TableHead className="text-[#4c4c4c]">Status</TableHead>
+                  <TableHead className="text-right text-[#4c4c4c]">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {groupedProducts.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                  <TableRow className="border-white/0">
+                    <TableCell colSpan={7} className="py-12 text-center text-[#686868]">
                       {getActiveInventoryEmptyState()}
                     </TableCell>
                   </TableRow>
@@ -385,84 +526,87 @@ export default function Inventory() {
                   groupedProducts.map((group) => {
                     const isExpanded = expandedGroups.includes(group.key);
                     const hasMultipleBatches = group.batchCount > 1;
-                    const singleProduct = group.products[0];
 
                     return (
                       <Fragment key={group.key}>
-                        <TableRow className="border-border hover:bg-muted/30">
-                          <TableCell className="font-medium text-foreground">
-                            <div className="flex items-start gap-2">
-                              {hasMultipleBatches ? (
-                                <button
-                                  type="button"
-                                  onClick={() => toggleGroup(group.key)}
-                                  className="mt-0.5 rounded-sm p-0.5 text-muted-foreground transition-colors hover:text-foreground"
-                                  aria-expanded={isExpanded}
-                                  aria-label={`${isExpanded ? "Hide" : "Show"} batches for ${group.name}`}
-                                >
-                                  {isExpanded ? (
-                                    <ChevronDown className="h-4 w-4" />
-                                  ) : (
-                                    <ChevronRight className="h-4 w-4" />
-                                  )}
-                                </button>
-                              ) : (
-                                <span className="mt-0.5 h-4 w-4" />
-                              )}
+                        <TableRow className="border-b border-white/25 hover:bg-white/15">
+                          <TableCell className="font-medium text-[#171717]">
+                            <div className="flex items-center gap-3">
+                              <div
+                                className="product-thumb text-white"
+                                style={{ backgroundColor: getProductColor(group.name) }}
+                              >
+                                {group.name.slice(0, 1).toUpperCase()}
+                              </div>
                               <div>
-                                <p className="font-medium text-foreground">{group.name}</p>
-                                <p className="text-xs text-muted-foreground">
-                                  {hasMultipleBatches ? `${group.batchCount} stock batches` : "Single batch"}
+                                <div className="flex items-center gap-2">
+                                  {hasMultipleBatches ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleGroup(group.key)}
+                                      className="text-[#666] transition-colors hover:text-[#171717]"
+                                      aria-expanded={isExpanded}
+                                    >
+                                      {isExpanded ? (
+                                        <ChevronDown className="h-4 w-4" />
+                                      ) : (
+                                        <ChevronRight className="h-4 w-4" />
+                                      )}
+                                    </button>
+                                  ) : null}
+                                  <span>{group.name}</span>
+                                </div>
+                                <p className="text-xs text-[#666]">
+                                  {hasMultipleBatches
+                                    ? `${group.batchCount} stock batches`
+                                    : "Single batch"}
                                 </p>
                               </div>
                             </div>
                           </TableCell>
-                          <TableCell className="text-muted-foreground">{group.category}</TableCell>
-                          <TableCell className="text-foreground">{group.totalQuantity}</TableCell>
-                          <TableCell className="text-muted-foreground">
+                          <TableCell className="text-[#444]">{group.category}</TableCell>
+                          <TableCell className="text-[#171717]">{group.totalQuantity}</TableCell>
+                          <TableCell className="text-[#171717]">
+                            {formatCurrency(unitPriceByName.get(group.name) ?? 0)}
+                          </TableCell>
+                          <TableCell className="text-[#444]">{group.earliestExpiry ?? "-"}</TableCell>
+                          <TableCell>{getStatusBadge(getGroupStatus(group))}</TableCell>
+                          <TableCell className="text-right">
                             {hasMultipleBatches ? (
-                              <div className="space-y-1">
-                                <p>{group.earliestExpiry || "-"}</p>
-                                <p className="text-xs text-muted-foreground">Earliest expiry</p>
-                              </div>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => toggleGroup(group.key)}
+                                className="h-8 text-[#171717] hover:bg-white/50"
+                              >
+                                {isExpanded ? "Hide" : "View"}
+                              </Button>
                             ) : (
-                              singleProduct.expiry_date || "-"
+                              <span className="text-xs text-[#666]">-</span>
                             )}
                           </TableCell>
-                          <TableCell>{getStatusBadge(getGroupStatus(group))}</TableCell>
                         </TableRow>
-                        {hasMultipleBatches && isExpanded && (
-                          <TableRow className="border-border bg-muted/10 hover:bg-muted/10">
-                            <TableCell colSpan={5} className="px-4 py-4">
-                              <div className="rounded-lg border border-border/60 bg-background/60 p-4">
-                                <div className="mb-3 grid grid-cols-1 gap-2 text-xs uppercase tracking-wide text-muted-foreground md:grid-cols-[1.8fr_1fr_1fr]">
-                                  <span>Batch</span>
-                                  <span>Expiry Date</span>
-                                  <span>Stock</span>
-                                </div>
-                                <div className="space-y-3">
-                                  {group.products.map((product, index) => (
-                                    <div
-                                      key={product.id}
-                                      className="grid grid-cols-1 gap-3 rounded-md border border-border/60 bg-card/70 p-3 md:grid-cols-[1.8fr_1fr_1fr] md:items-center"
-                                    >
-                                      <div>
-                                        <p className="text-sm font-medium text-foreground">
-                                          Batch {index + 1}
-                                        </p>
-                                        <div className="mt-1">{getStatusBadge(product.status)}</div>
-                                      </div>
-                                      <p className="text-sm text-muted-foreground">
-                                        {product.expiry_date || "-"}
-                                      </p>
-                                      <p className="text-sm text-foreground">{product.quantity}</p>
-                                    </div>
-                                  ))}
-                                </div>
+                        {hasMultipleBatches && isExpanded ? (
+                          <TableRow className="border-b border-white/25 bg-white/20 hover:bg-white/20">
+                            <TableCell colSpan={7} className="px-4 py-4">
+                              <div className="grid gap-3 md:grid-cols-3">
+                                {group.products.map((product, index) => (
+                                  <div key={product.id} className="rounded-[4px] bg-[#efebe6] p-3">
+                                    <p className="text-sm font-medium text-[#171717]">
+                                      Batch {index + 1}
+                                    </p>
+                                    <p className="mt-1 text-xs text-[#666]">
+                                      Expiry: {product.expiry_date ?? "-"}
+                                    </p>
+                                    <p className="text-xs text-[#666]">Stock: {product.quantity}</p>
+                                    <div className="mt-2">{getStatusBadge(product.status)}</div>
+                                  </div>
+                                ))}
                               </div>
                             </TableCell>
                           </TableRow>
-                        )}
+                        ) : null}
                       </Fragment>
                     );
                   })
@@ -472,65 +616,66 @@ export default function Inventory() {
           )}
         </div>
 
-        <div className="chart-container overflow-hidden border-destructive/20">
+        <div className="workspace-panel">
           <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <div className="flex items-center gap-2">
-                <AlertTriangle className="h-5 w-5 text-destructive" />
-                <h2 className="text-xl font-semibold text-foreground">Expired Products</h2>
+                <AlertTriangle className="h-5 w-5 text-[#cf5a5a]" />
+                <h2 className="text-xl font-medium text-[#171717]">Expired Products</h2>
               </div>
-              <p className="mt-1 text-sm text-muted-foreground">
+              <p className="mt-1 text-sm text-[#666]">
                 Remove expired batches from inventory while keeping transaction history.
               </p>
             </div>
-            <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm">
-              <p className="font-medium text-foreground">{expiredProducts.length} expired batches</p>
-              <p className="text-muted-foreground">{expiredUnits} units marked expired</p>
+            <div className="rounded-[4px] bg-[#efebe6] px-4 py-3 text-sm text-[#171717]">
+              <p className="font-medium">{expiredProducts.length} expired batches</p>
+              <p className="text-[#666]">{expiredUnits} units marked expired</p>
             </div>
           </div>
 
-          {isLoading || isSeeding ? (
+          {isLoading ? (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              <Loader2 className="h-6 w-6 animate-spin text-[#666]" />
             </div>
           ) : (
             <Table>
               <TableHeader>
-                <TableRow className="border-border hover:bg-transparent">
-                  <TableHead className="text-muted-foreground">Product Name</TableHead>
-                  <TableHead className="text-muted-foreground">Category</TableHead>
-                  <TableHead className="text-muted-foreground">Quantity</TableHead>
-                  <TableHead className="text-muted-foreground">Expired On</TableHead>
-                  <TableHead className="text-muted-foreground">Status</TableHead>
-                  <TableHead className="text-right text-muted-foreground">Action</TableHead>
+                <TableRow className="border-b border-white/40 hover:bg-transparent">
+                  <TableHead className="text-[#4c4c4c]">Product</TableHead>
+                  <TableHead className="text-[#4c4c4c]">Category</TableHead>
+                  <TableHead className="text-[#4c4c4c]">Quantity</TableHead>
+                  <TableHead className="text-[#4c4c4c]">Expired On</TableHead>
+                  <TableHead className="text-[#4c4c4c]">Status</TableHead>
+                  <TableHead className="text-right text-[#4c4c4c]">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {expiredProducts.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+                  <TableRow className="border-white/0">
+                    <TableCell colSpan={6} className="py-10 text-center text-[#686868]">
                       No expired products match the current filters.
                     </TableCell>
                   </TableRow>
                 ) : (
                   expiredProducts.map((product) => (
-                    <TableRow key={product.id} className="border-border hover:bg-muted/30">
-                      <TableCell className="font-medium text-foreground">{product.name}</TableCell>
-                      <TableCell className="text-muted-foreground">{product.category}</TableCell>
-                      <TableCell className="text-foreground">{product.quantity}</TableCell>
-                      <TableCell className="text-muted-foreground">{product.expiry_date}</TableCell>
+                    <TableRow key={product.id} className="border-b border-white/25 hover:bg-white/15">
+                      <TableCell className="font-medium text-[#171717]">{product.name}</TableCell>
+                      <TableCell className="text-[#444]">{product.category}</TableCell>
+                      <TableCell className="text-[#171717]">{product.quantity}</TableCell>
+                      <TableCell className="text-[#444]">{product.expiry_date}</TableCell>
                       <TableCell>
                         <span className="status-low">Expired</span>
                       </TableCell>
                       <TableCell className="text-right">
                         <Button
                           type="button"
-                          variant="destructive"
+                          variant="ghost"
                           size="sm"
                           onClick={() => setProductPendingDelete(product)}
                           disabled={deleteExpiredProductMutation.isPending}
+                          className="h-8 text-[#b34d4d] hover:bg-white/50 hover:text-[#b34d4d]"
                         >
-                          <Trash2 className="h-4 w-4" />
+                          <Trash2 className="mr-2 h-4 w-4" />
                           Delete
                         </Button>
                       </TableCell>
@@ -551,10 +696,10 @@ export default function Inventory() {
           }
         }}
       >
-        <AlertDialogContent>
+        <AlertDialogContent className="border-[#d9d2c9] bg-[#f7f4ef] text-[#171717]">
           <AlertDialogHeader>
             <AlertDialogTitle>Delete expired product?</AlertDialogTitle>
-            <AlertDialogDescription>
+            <AlertDialogDescription className="text-[#666]">
               {productPendingDelete
                 ? `This will permanently remove the expired ${productPendingDelete.name} batch from inventory. Linked transactions will be kept, but detached from this product record.`
                 : "This action cannot be undone."}
@@ -565,7 +710,7 @@ export default function Inventory() {
               Cancel
             </AlertDialogCancel>
             <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className="bg-[#cf5a5a] text-white hover:bg-[#c55252]"
               disabled={!productPendingDelete || deleteExpiredProductMutation.isPending}
               onClick={(event) => {
                 event.preventDefault();

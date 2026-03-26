@@ -1,15 +1,15 @@
 import { Link, useLocation } from "react-router-dom";
- import {
-   LayoutDashboard,
-   Package,
-   Receipt,
-   BarChart3,
-   Brain,
-  Store,
+import {
+  BarChart3,
+  Brain,
+  LayoutDashboard,
   LogOut,
- } from "lucide-react";
- import { cn } from "@/lib/utils";
+  Package,
+  Receipt,
+} from "lucide-react";
 import { useAuthContext } from "@/contexts/AuthContext";
+import { BrandMark } from "@/components/BrandMark";
+import { cn } from "@/lib/utils";
  
  const navItems = [
    { name: "Dashboard", path: "/", icon: LayoutDashboard },
@@ -19,70 +19,73 @@ import { useAuthContext } from "@/contexts/AuthContext";
    { name: "Forecast", path: "/forecast", icon: Brain },
  ];
  
- export function Sidebar() {
-   const location = useLocation();
+export function Sidebar() {
+  const location = useLocation();
   const { profile, signOut } = useAuthContext();
 
-  // Parse company name for display
   const companyName = profile?.company_name || "Your Company";
   const nameParts = companyName.split(" ");
-  const line1 = nameParts.slice(0, Math.ceil(nameParts.length / 2)).join(" ");
-  const line2 = nameParts.slice(Math.ceil(nameParts.length / 2)).join(" ");
- 
-   return (
-     <aside
-      className="fixed left-0 top-0 h-screen w-56 bg-[#1a1a1a] flex flex-col z-50"
-     >
-       {/* Logo */}
-      <div className="p-4">
-        <div className="bg-[#2a2a2a] rounded-lg p-3 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-md bg-primary/90 flex items-center justify-center flex-shrink-0">
-            <Store className="w-6 h-6 text-primary-foreground" />
-           </div>
-          <div>
-            <h1 className="text-foreground font-semibold text-sm leading-tight">{line1}</h1>
-            {line2 && <h2 className="text-foreground font-semibold text-sm leading-tight">{line2}</h2>}
+  const lines =
+    nameParts.length <= 2
+      ? [companyName]
+      : [
+          nameParts.slice(0, Math.ceil(nameParts.length / 2)).join(" "),
+          nameParts.slice(Math.ceil(nameParts.length / 2)).join(" "),
+        ];
+
+  return (
+    <aside className="flex min-h-screen flex-col bg-[#231f20] text-white">
+      <div className="px-4 pb-6 pt-4">
+        <div className="flex items-center gap-3">
+          <BrandMark className="h-14 w-14" tone="light" />
+          <div className="min-w-0 space-y-1">
+            {lines.map((line) => (
+              <p
+                key={line}
+                className="text-sm font-semibold uppercase leading-tight tracking-[0.14em] text-[#f6f3ee]"
+              >
+                {line}
+              </p>
+            ))}
+            <p className="text-[10px] uppercase tracking-[0.28em] text-[#ce5a5a]">
+              Inventory System
+            </p>
           </div>
-         </div>
-       </div>
- 
-      {/* Divider */}
-      <div className="mx-4 h-px bg-[#333]" />
+        </div>
+      </div>
 
-       {/* Navigation */}
-      <nav className="flex-1 px-3 py-4 space-y-1">
-         {navItems.map((item) => {
-           const isActive = location.pathname === item.path;
-           const Icon = item.icon;
-           
-           return (
-             <Link
-               key={item.path}
-               to={item.path}
-               className={cn(
-                "flex items-center gap-3 px-4 py-2.5 rounded-md text-sm font-medium transition-all duration-200",
-                isActive 
-                  ? "bg-primary text-primary-foreground" 
-                  : "text-[#888] hover:text-foreground hover:bg-[#2a2a2a]"
-               )}
-             >
-              <Icon className="w-4 h-4 flex-shrink-0" />
+      <nav className="flex-1 space-y-1 pb-4">
+        {navItems.map((item) => {
+          const isActive = location.pathname === item.path;
+          const Icon = item.icon;
+
+          return (
+            <Link
+              key={item.path}
+              to={item.path}
+              className={cn(
+                "flex items-center gap-3 px-5 py-3 text-[11px] font-medium transition-colors",
+                isActive
+                  ? "bg-[#ce5a5a] text-white"
+                  : "text-[#f2ece4] hover:bg-white/5",
+              )}
+            >
+              <Icon className="h-3.5 w-3.5 shrink-0" />
               <span>{item.name}</span>
-             </Link>
-           );
-         })}
-       </nav>
+            </Link>
+          );
+        })}
+      </nav>
 
-      {/* Logout */}
-      <div className="p-3 border-t border-[#333]">
+      <div className="mt-auto border-t border-white/10 p-3">
         <button
           onClick={signOut}
-          className="flex items-center gap-3 px-4 py-2.5 rounded-md text-sm font-medium text-[#888] hover:text-foreground hover:bg-[#2a2a2a] w-full transition-all duration-200"
+          className="flex w-full items-center gap-3 px-4 py-2.5 text-[11px] font-medium text-[#f2ece4] transition-colors hover:bg-white/5"
         >
-          <LogOut className="w-4 h-4" />
+          <LogOut className="h-3.5 w-3.5" />
           <span>Log out</span>
         </button>
       </div>
-     </aside>
-   );
- }
+    </aside>
+  );
+}

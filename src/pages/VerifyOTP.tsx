@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Store } from "lucide-react";
+import { AuthShell } from "@/components/auth/AuthShell";
 import { Button } from "@/components/ui/button";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import { supabase } from "@/integrations/supabase/client";
@@ -182,28 +182,17 @@ export default function VerifyOTP() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4">
-      <div className="flex items-center gap-3 mb-8">
-        <div className="w-12 h-12 bg-primary rounded-lg flex items-center justify-center">
-          <Store className="w-7 h-7 text-primary-foreground" />
-        </div>
-        <div>
-          <h1 className="text-xl font-bold text-primary">BAG-INVENT</h1>
-          <p className="text-xs text-muted-foreground">AI-Powered</p>
-          <p className="text-xs text-muted-foreground">Inventory Management</p>
-        </div>
-      </div>
-
-      <div className="w-full max-w-md bg-[#2a2a2a] rounded-lg p-8">
-        <div className="text-center mb-6">
-          <h2 className="text-lg font-semibold text-foreground mb-2">Verify Your New Account</h2>
-          <p className="text-sm text-muted-foreground">
+    <AuthShell eyebrow="Verify OTP" formWidthClassName="max-w-[460px]">
+      <div className="bg-[#231f20] p-4 shadow-[0_20px_40px_rgba(0,0,0,0.25)] sm:p-5">
+        <div className="mb-6 text-center">
+          <h2 className="mb-2 text-lg font-semibold text-[#f4efe8]">Verify Your New Account</h2>
+          <p className="text-sm text-[#dad2ca]">
             Enter the {EMAIL_OTP_LENGTH}-digit code sent to{" "}
-            <span className="text-foreground font-medium">{email}</span>
+            <span className="font-medium text-white">{email}</span>
           </p>
         </div>
 
-        <div className="flex justify-center mb-6">
+        <div className="mb-6 flex justify-center">
           <InputOTP maxLength={EMAIL_OTP_LENGTH} value={code} onChange={setCode}>
             <InputOTPGroup>
               <InputOTPSlot index={0} />
@@ -221,16 +210,16 @@ export default function VerifyOTP() {
         <Button
           onClick={handleVerify}
           disabled={isVerifying || isSendingCode || code.length !== EMAIL_OTP_LENGTH}
-          className="w-full bg-primary hover:bg-primary/90 text-primary-foreground h-11 font-medium"
+          className="h-11 w-full rounded-none bg-[#cf5a5a] font-medium text-white hover:bg-[#c55252]"
         >
           {isVerifying ? "Verifying..." : "Verify Account"}
         </Button>
 
-        <div className="text-center mt-4 space-y-3">
+        <div className="mt-4 space-y-3 text-center">
           <button
             onClick={handleResend}
             disabled={isSendingCode || countdown > 0}
-            className="text-sm text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+            className="text-sm text-[#dad2ca] transition-colors hover:text-white disabled:opacity-50"
           >
             {isSendingCode
               ? "Sending code..."
@@ -241,13 +230,13 @@ export default function VerifyOTP() {
           <div>
             <button
               onClick={handleUseAnotherAccount}
-              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+              className="text-sm text-[#dad2ca] transition-colors hover:text-white"
             >
               Back to log in
             </button>
           </div>
         </div>
       </div>
-    </div>
+    </AuthShell>
   );
 }

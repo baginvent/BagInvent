@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Store, Eye, EyeOff, ArrowLeft } from "lucide-react";
+import { ArrowLeft, Eye, EyeOff } from "lucide-react";
+import { AuthShell } from "@/components/auth/AuthShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
@@ -40,7 +41,12 @@ export default function Signup() {
     firstName: "",
     lastName: "",
   });
+
   const redirectTo = "/";
+  const inputClassName =
+    "h-11 rounded-none border-0 bg-[#e4e4e4] text-[#171717] shadow-none focus-visible:ring-1 focus-visible:ring-[#cf5a5a] focus-visible:ring-offset-0";
+  const secondaryInputClassName =
+    "h-11 rounded-none border-0 bg-[#dedede] text-[#171717] shadow-none focus-visible:ring-1 focus-visible:ring-[#cf5a5a] focus-visible:ring-offset-0";
 
   useEffect(() => {
     if (countdown <= 0) {
@@ -60,16 +66,24 @@ export default function Signup() {
     setStep(3);
   }, [pendingOtpContext.email, pendingOtpContext.userId]);
 
-  const handleStep1Submit = (e: React.FormEvent) => {
-    e.preventDefault();
-
+  const validatePasswordFields = () => {
     if (formData.password !== formData.confirmPassword) {
       toast.error("Passwords do not match");
-      return;
+      return false;
     }
 
     if (formData.password.length < 6) {
       toast.error("Password must be at least 6 characters");
+      return false;
+    }
+
+    return true;
+  };
+
+  const handleStep1Submit = (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!validatePasswordFields()) {
       return;
     }
 
@@ -78,6 +92,11 @@ export default function Signup() {
 
   const handleStep2Submit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!validatePasswordFields()) {
+      return;
+    }
+
     setIsLoading(true);
 
     try {
@@ -215,38 +234,49 @@ export default function Signup() {
     setStep(1);
   };
 
-  return (
-    <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4">
-      <div className="flex items-center gap-3 mb-8">
-        <div className="w-12 h-12 bg-primary rounded-lg flex items-center justify-center">
-          <Store className="w-7 h-7 text-primary-foreground" />
-        </div>
-        <div>
-          <h1 className="text-xl font-bold text-primary">BAG-INVENT</h1>
-          <p className="text-xs text-muted-foreground">AI-Powered</p>
-          <p className="text-xs text-muted-foreground">Inventory Management</p>
-        </div>
-      </div>
+  const stepEyebrow =
+    step === 1
+      ? "Sign up / Person Info"
+      : step === 2
+        ? "Sign up / Company Info"
+        : "Sign up / Verify OTP";
 
-      <div className="w-full max-w-md bg-[#2a2a2a] rounded-lg p-8">
+  return (
+    <AuthShell eyebrow={stepEyebrow} formWidthClassName="max-w-[500px]">
+      <div className="bg-[#231f20] p-4 shadow-[0_20px_40px_rgba(0,0,0,0.25)] sm:p-5">
         {step === 1 ? (
           <form onSubmit={handleStep1Submit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="companyName" className="text-muted-foreground text-sm">
-                Company Name
-              </Label>
-              <Input
-                id="companyName"
-                type="text"
-                value={formData.companyName}
-                onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
-                className="bg-[#e5e5e5] border-0 text-[#1a1a1a] h-11"
-                required
-              />
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="firstName" className="text-sm font-medium text-[#f4efe8]">
+                  First Name
+                </Label>
+                <Input
+                  id="firstName"
+                  type="text"
+                  value={formData.firstName}
+                  onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
+                  className={inputClassName}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="lastName" className="text-sm font-medium text-[#f4efe8]">
+                  Last Name
+                </Label>
+                <Input
+                  id="lastName"
+                  type="text"
+                  value={formData.lastName}
+                  onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
+                  className={inputClassName}
+                  required
+                />
+              </div>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="email" className="text-muted-foreground text-sm">
+              <Label htmlFor="email" className="text-sm font-medium text-[#f4efe8]">
                 Email
               </Label>
               <Input
@@ -254,13 +284,13 @@ export default function Signup() {
                 type="email"
                 value={formData.email}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                className="bg-[#e5e5e5] border-0 text-[#1a1a1a] h-11"
+                className={inputClassName}
                 required
               />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="password" className="text-muted-foreground text-sm">
+              <Label htmlFor="password" className="text-sm font-medium text-[#f4efe8]">
                 Password
               </Label>
               <div className="relative">
@@ -269,7 +299,7 @@ export default function Signup() {
                   type={showPassword ? "text" : "password"}
                   value={formData.password}
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  className="bg-[#e5e5e5] border-0 text-[#1a1a1a] h-11 pr-10"
+                  className={`${inputClassName} pr-10`}
                   required
                 />
                 <button
@@ -277,13 +307,13 @@ export default function Signup() {
                   onClick={() => setShowPassword(!showPassword)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-[#666]"
                 >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="confirmPassword" className="text-muted-foreground text-sm">
+              <Label htmlFor="confirmPassword" className="text-sm font-medium text-[#f4efe8]">
                 Confirm Password
               </Label>
               <div className="relative">
@@ -291,8 +321,10 @@ export default function Signup() {
                   id="confirmPassword"
                   type={showConfirmPassword ? "text" : "password"}
                   value={formData.confirmPassword}
-                  onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
-                  className="bg-[#e5e5e5] border-0 text-[#1a1a1a] h-11 pr-10"
+                  onChange={(e) =>
+                    setFormData({ ...formData, confirmPassword: e.target.value })
+                  }
+                  className={`${inputClassName} pr-10`}
                   required
                 />
                 <button
@@ -301,16 +333,16 @@ export default function Signup() {
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-[#666]"
                 >
                   {showConfirmPassword ? (
-                    <EyeOff className="w-4 h-4" />
+                    <EyeOff className="h-4 w-4" />
                   ) : (
-                    <Eye className="w-4 h-4" />
+                    <Eye className="h-4 w-4" />
                   )}
                 </button>
               </div>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="phoneNumber" className="text-muted-foreground text-sm">
+              <Label htmlFor="phoneNumber" className="text-sm font-medium text-[#f4efe8]">
                 Phone Number
               </Label>
               <Input
@@ -318,22 +350,19 @@ export default function Signup() {
                 type="tel"
                 value={formData.phoneNumber}
                 onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
-                className="bg-[#e5e5e5] border-0 text-[#1a1a1a] h-11"
+                className={inputClassName}
               />
             </div>
 
             <Button
               type="submit"
-              className="w-full bg-primary hover:bg-primary/90 text-primary-foreground h-11 font-medium mt-2"
+              className="mt-2 h-11 w-full rounded-none bg-[#cf5a5a] font-medium text-white hover:bg-[#c55252]"
             >
-              Continue
+              Proceed
             </Button>
 
-            <div className="text-center mt-4">
-              <Link
-                to="/auth"
-                className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-              >
+            <div className="text-center text-sm text-[#f4efe8]">
+              <Link to="/auth" className="transition-colors hover:text-white">
                 Already have an account? Log in
               </Link>
             </div>
@@ -343,96 +372,123 @@ export default function Signup() {
             <button
               type="button"
               onClick={() => setStep(1)}
-              className="flex items-center gap-2 text-muted-foreground hover:text-foreground mb-4"
+              className="mb-2 flex items-center gap-2 text-sm text-[#f4efe8] transition-colors hover:text-white"
             >
-              <ArrowLeft className="w-4 h-4" />
+              <ArrowLeft className="h-4 w-4" />
               Back
             </button>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="firstName" className="text-muted-foreground text-sm">
-                  First Name
-                </Label>
-                <Input
-                  id="firstName"
-                  type="text"
-                  value={formData.firstName}
-                  onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
-                  className="bg-[#e5e5e5] border-0 text-[#1a1a1a] h-11"
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="lastName" className="text-muted-foreground text-sm">
-                  Last Name
-                </Label>
-                <Input
-                  id="lastName"
-                  type="text"
-                  value={formData.lastName}
-                  onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
-                  className="bg-[#e5e5e5] border-0 text-[#1a1a1a] h-11"
-                  required
-                />
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="companyName" className="text-sm font-medium text-[#f4efe8]">
+                Company Name
+              </Label>
+              <Input
+                id="companyName"
+                type="text"
+                value={formData.companyName}
+                onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
+                className={secondaryInputClassName}
+                required
+              />
             </div>
 
             <div className="space-y-2">
-              <Label className="text-muted-foreground text-sm">Email</Label>
+              <Label htmlFor="step2Email" className="text-sm font-medium text-[#f4efe8]">
+                Email
+              </Label>
               <Input
+                id="step2Email"
                 type="email"
                 value={formData.email}
-                disabled
-                className="bg-[#3a3a3a] border-0 text-muted-foreground h-11"
+                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                className={secondaryInputClassName}
+                required
               />
             </div>
 
             <div className="space-y-2">
-              <Label className="text-muted-foreground text-sm">Password</Label>
-              <Input
-                type="password"
-                value="********"
-                disabled
-                className="bg-[#3a3a3a] border-0 text-muted-foreground h-11"
-              />
+              <Label htmlFor="step2Password" className="text-sm font-medium text-[#f4efe8]">
+                Password
+              </Label>
+              <div className="relative">
+                <Input
+                  id="step2Password"
+                  type={showPassword ? "text" : "password"}
+                  value={formData.password}
+                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                  className={`${secondaryInputClassName} pr-10`}
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#666]"
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
             </div>
 
             <div className="space-y-2">
-              <Label className="text-muted-foreground text-sm">Confirm Password</Label>
-              <Input
-                type="password"
-                value="********"
-                disabled
-                className="bg-[#3a3a3a] border-0 text-muted-foreground h-11"
-              />
+              <Label
+                htmlFor="step2ConfirmPassword"
+                className="text-sm font-medium text-[#f4efe8]"
+              >
+                Confirm Password
+              </Label>
+              <div className="relative">
+                <Input
+                  id="step2ConfirmPassword"
+                  type={showConfirmPassword ? "text" : "password"}
+                  value={formData.confirmPassword}
+                  onChange={(e) =>
+                    setFormData({ ...formData, confirmPassword: e.target.value })
+                  }
+                  className={`${secondaryInputClassName} pr-10`}
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#666]"
+                >
+                  {showConfirmPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
             </div>
 
             <div className="space-y-2">
-              <Label className="text-muted-foreground text-sm">Phone Number</Label>
+              <Label htmlFor="step2PhoneNumber" className="text-sm font-medium text-[#f4efe8]">
+                Phone Number
+              </Label>
               <Input
+                id="step2PhoneNumber"
                 type="tel"
                 value={formData.phoneNumber}
-                disabled
-                className="bg-[#3a3a3a] border-0 text-muted-foreground h-11"
+                onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
+                className={secondaryInputClassName}
               />
             </div>
 
             <Button
               type="submit"
               disabled={isLoading}
-              className="w-full bg-primary hover:bg-primary/90 text-primary-foreground h-11 font-medium mt-2"
+              className="mt-2 h-11 w-full rounded-none bg-[#cf5a5a] font-medium text-white hover:bg-[#c55252]"
             >
-              {isLoading ? "Creating account..." : "Create Account and Send OTP"}
+              {isLoading ? "Creating account..." : "Sign up"}
             </Button>
           </form>
         ) : (
           <div className="space-y-6">
             <div className="text-center">
-              <h2 className="text-lg font-semibold text-foreground mb-2">Verify Your New Account</h2>
-              <p className="text-sm text-muted-foreground">
+              <h2 className="mb-2 text-lg font-semibold text-[#f4efe8]">Verify Your New Account</h2>
+              <p className="text-sm text-[#dad2ca]">
                 Enter the {EMAIL_OTP_LENGTH}-digit code for{" "}
-                <span className="text-foreground font-medium">{formData.email}</span>
+                <span className="font-medium text-white">{formData.email}</span>
               </p>
             </div>
 
@@ -454,16 +510,16 @@ export default function Signup() {
             <Button
               onClick={handleVerify}
               disabled={isVerifying || isSendingCode || otpCode.length !== EMAIL_OTP_LENGTH}
-              className="w-full bg-primary hover:bg-primary/90 text-primary-foreground h-11 font-medium"
+              className="h-11 w-full rounded-none bg-[#cf5a5a] font-medium text-white hover:bg-[#c55252]"
             >
               {isVerifying ? "Verifying..." : "Verify Account"}
             </Button>
 
-            <div className="text-center space-y-3">
+            <div className="space-y-3 text-center">
               <button
                 onClick={handleResend}
                 disabled={isSendingCode || countdown > 0}
-                className="text-sm text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                className="text-sm text-[#dad2ca] transition-colors hover:text-white disabled:opacity-50"
               >
                 {isSendingCode
                   ? "Sending code..."
@@ -474,7 +530,7 @@ export default function Signup() {
               <div>
                 <button
                   onClick={handleUseAnotherAccount}
-                  className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+                  className="text-sm text-[#dad2ca] transition-colors hover:text-white"
                 >
                   Use another account
                 </button>
@@ -483,6 +539,6 @@ export default function Signup() {
           </div>
         )}
       </div>
-    </div>
+    </AuthShell>
   );
 }

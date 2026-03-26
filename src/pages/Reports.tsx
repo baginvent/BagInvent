@@ -1,26 +1,29 @@
-import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { useEffect, useMemo, useState } from "react";
 import {
-  LineChart,
-  Line,
-  BarChart,
   Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Line,
+  LineChart,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
 } from "recharts";
-import { useEffect, useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
+import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
 import { useAuthContext } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ensureDemoInventoryAndTransactions, isMissingTransactionsTableError } from "@/lib/demoData";
+import {
+  ensureDemoInventoryAndTransactions,
+  isMissingTransactionsTableError,
+} from "@/lib/demoData";
 import { buildMockTransactions, formatCurrency } from "@/lib/forecastInsights";
 
 type Product = Tables<"products">;
@@ -48,7 +51,6 @@ export default function Reports() {
         if (!active) return;
 
         if (result.seededProducts || result.seededTransactions) {
-          toast.success("Reports updated from your current inventory data.");
           queryClient.invalidateQueries({ queryKey: ["products", user.id] });
           queryClient.invalidateQueries({ queryKey: ["transactions", user.id] });
         }
@@ -211,129 +213,109 @@ export default function Reports() {
       totalUnits === 0 ? 0 : Math.round((value / totalUnits) * 100);
 
     return [
-      { color: "hsl(var(--destructive))", name: "Critical (0-7 days)", units: totals.critical, value: toPercent(totals.critical) },
-      { color: "hsl(var(--warning))", name: "Attention (8-30 days)", units: totals.attention, value: toPercent(totals.attention) },
-      { color: "hsl(var(--success))", name: "Healthy (31+ days)", units: totals.healthy, value: toPercent(totals.healthy) },
-      { color: "hsl(var(--primary))", name: "No Expiry", units: totals.noExpiry, value: toPercent(totals.noExpiry) },
+      { color: "#cf5a5a", name: "Critical (0-7 days)", units: totals.critical, value: toPercent(totals.critical) },
+      { color: "#f0d66d", name: "Attention (8-30 days)", units: totals.attention, value: toPercent(totals.attention) },
+      { color: "#5aa36c", name: "Healthy (31+ days)", units: totals.healthy, value: toPercent(totals.healthy) },
+      { color: "#2d63c8", name: "No Expiry", units: totals.noExpiry, value: toPercent(totals.noExpiry) },
     ].filter((item) => item.units > 0);
   }, [products]);
 
   return (
-    <DashboardLayout>
+    <DashboardLayout pageLabel="Reports">
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold text-foreground">Reports</h1>
-          <p className="text-muted-foreground mt-1">Analyze your business performance</p>
+          <h1 className="text-[2rem] font-medium text-[#171717]">Reports</h1>
         </div>
 
-        {usingMockTransactions && !hasLoadError && (
-          <div className="rounded-lg border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
+        {usingMockTransactions && !hasLoadError ? (
+          <div className="workspace-card-soft text-sm text-[#666]">
             Reports are currently using seeded mock transaction history.
           </div>
-        )}
+        ) : null}
 
-        {hasLoadError && (
-          <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-foreground">
-            Report data could not be loaded. Refresh after your inventory and transactions tables are available.
+        {hasLoadError ? (
+          <div className="workspace-card-soft text-sm text-[#b34d4d]">
+            Report data could not be loaded. Refresh after your inventory and transactions tables
+            are available.
           </div>
-        )}
+        ) : null}
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="chart-container">
-            <h3 className="text-lg font-semibold text-foreground mb-4">Weekly Sales</h3>
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+          <div className="workspace-panel">
+            <h2 className="mb-4 text-lg font-medium text-[#171717]">Weekly Sales</h2>
             <div className="h-[300px]">
               {isLoading ? (
-                <div className="flex items-center justify-center h-full">
-                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                <div className="flex h-full items-center justify-center">
+                  <Loader2 className="h-6 w-6 animate-spin text-[#666]" />
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={salesData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis dataKey="day" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                    <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                    <CartesianGrid stroke="#bdb4aa" vertical={false} />
+                    <XAxis dataKey="day" stroke="#3a3a3a" fontSize={11} tickLine={false} />
+                    <YAxis stroke="#3a3a3a" fontSize={11} tickLine={false} />
                     <Tooltip
                       contentStyle={{
-                        backgroundColor: "hsl(var(--card))",
-                        border: "1px solid hsl(var(--border))",
-                        borderRadius: "8px",
-                        color: "hsl(var(--foreground))",
+                        backgroundColor: "#f7f4ef",
+                        border: "1px solid #d8cfc4",
+                        borderRadius: "4px",
+                        color: "#171717",
                       }}
                       formatter={(value: number) => [formatCurrency(value), "Sales"]}
                     />
-                    <Bar dataKey="sales" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="sales">
+                      {salesData.map((_, index) => (
+                        <Cell key={index} fill={index === salesData.length - 1 ? "#cf5a5a" : "#2d63c8"} />
+                      ))}
+                    </Bar>
                   </BarChart>
                 </ResponsiveContainer>
               )}
             </div>
           </div>
 
-          <div className="chart-container">
-            <h3 className="text-lg font-semibold text-foreground mb-4">Inventory Movement</h3>
+          <div className="workspace-panel">
+            <h2 className="mb-4 text-lg font-medium text-[#171717]">Inventory Movement</h2>
             <div className="h-[300px]">
               {isLoading ? (
-                <div className="flex items-center justify-center h-full">
-                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                <div className="flex h-full items-center justify-center">
+                  <Loader2 className="h-6 w-6 animate-spin text-[#666]" />
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={inventoryMovement}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                    <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                    <CartesianGrid stroke="#bdb4aa" vertical={false} />
+                    <XAxis dataKey="month" stroke="#3a3a3a" fontSize={11} tickLine={false} />
+                    <YAxis stroke="#3a3a3a" fontSize={11} tickLine={false} />
                     <Tooltip
                       contentStyle={{
-                        backgroundColor: "hsl(var(--card))",
-                        border: "1px solid hsl(var(--border))",
-                        borderRadius: "8px",
-                        color: "hsl(var(--foreground))",
+                        backgroundColor: "#f7f4ef",
+                        border: "1px solid #d8cfc4",
+                        borderRadius: "4px",
+                        color: "#171717",
                       }}
                       formatter={(value: number) => [`${value} units`, "Movement"]}
                     />
-                    <Line
-                      type="monotone"
-                      dataKey="incoming"
-                      stroke="hsl(var(--success))"
-                      strokeWidth={2}
-                      dot={{ fill: "hsl(var(--success))" }}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="outgoing"
-                      stroke="hsl(var(--chart-2))"
-                      strokeWidth={2}
-                      dot={{ fill: "hsl(var(--chart-2))" }}
-                    />
+                    <Line type="monotone" dataKey="incoming" stroke="#5aa36c" strokeWidth={2.2} dot={false} />
+                    <Line type="monotone" dataKey="outgoing" stroke="#5642a5" strokeWidth={2.2} dot={false} />
                   </LineChart>
                 </ResponsiveContainer>
               )}
             </div>
-            <div className="flex justify-center gap-6 mt-4">
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full bg-success" />
-                <span className="text-sm text-muted-foreground">Incoming</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full bg-chart-2" />
-                <span className="text-sm text-muted-foreground">Outgoing</span>
-              </div>
-            </div>
           </div>
 
-          <div className="chart-container lg:col-span-2">
-            <h3 className="text-lg font-semibold text-foreground mb-4">Stock Aging Distribution</h3>
+          <div className="workspace-panel xl:col-span-2">
+            <h2 className="mb-4 text-lg font-medium text-[#171717]">Stock Aging Distribution</h2>
             {isLoading ? (
               <div className="flex items-center justify-center py-12">
-                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                <Loader2 className="h-6 w-6 animate-spin text-[#666]" />
               </div>
             ) : stockAging.length === 0 ? (
-              <div className="rounded-lg border border-border bg-secondary/20 p-4">
-                <p className="text-sm text-muted-foreground">
-                  Stock aging will appear here once inventory quantities and expiry dates are available.
-                </p>
+              <div className="workspace-card-soft text-sm text-[#666]">
+                Stock aging will appear here once inventory quantities and expiry dates are available.
               </div>
             ) : (
-              <div className="flex flex-col lg:flex-row items-center gap-8">
+              <div className="flex flex-col items-center gap-8 lg:flex-row">
                 <div className="h-[250px] w-full lg:w-1/2">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
@@ -341,21 +323,21 @@ export default function Reports() {
                         data={stockAging}
                         cx="50%"
                         cy="50%"
-                        innerRadius={60}
+                        innerRadius={62}
                         outerRadius={100}
                         paddingAngle={2}
                         dataKey="value"
                       >
                         {stockAging.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} />
+                          <Cell key={index} fill={entry.color} />
                         ))}
                       </Pie>
                       <Tooltip
                         contentStyle={{
-                          backgroundColor: "hsl(var(--card))",
-                          border: "1px solid hsl(var(--border))",
-                          borderRadius: "8px",
-                          color: "hsl(var(--foreground))",
+                          backgroundColor: "#f7f4ef",
+                          border: "1px solid #d8cfc4",
+                          borderRadius: "4px",
+                          color: "#171717",
                         }}
                         formatter={(value: number, _name, item) => [
                           `${value}%`,
@@ -365,12 +347,12 @@ export default function Reports() {
                     </PieChart>
                   </ResponsiveContainer>
                 </div>
-                <div className="flex flex-col gap-3 w-full">
+                <div className="w-full space-y-3">
                   {stockAging.map((item) => (
-                    <div key={item.name} className="flex items-center gap-3">
-                      <div className="w-4 h-4 rounded" style={{ backgroundColor: item.color }} />
-                      <span className="text-sm text-foreground">{item.name}</span>
-                      <span className="text-sm text-muted-foreground ml-auto">
+                    <div key={item.name} className="flex items-center gap-3 rounded-[4px] bg-[#efebe6] px-4 py-3">
+                      <div className="h-4 w-4 rounded" style={{ backgroundColor: item.color }} />
+                      <span className="text-sm text-[#171717]">{item.name}</span>
+                      <span className="ml-auto text-sm text-[#555]">
                         {item.value}% ({item.units} units)
                       </span>
                     </div>

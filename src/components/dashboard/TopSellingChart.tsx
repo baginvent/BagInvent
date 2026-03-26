@@ -2,14 +2,15 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import {
-  BarChart,
   Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  LabelList,
+  ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Cell,
 } from "recharts";
 import { useAuthContext } from "@/contexts/AuthContext";
 import { isMissingTransactionsTableError } from "@/lib/demoData";
@@ -25,16 +26,10 @@ type TopSellingDatum = {
   sales: number;
 };
 
-const BAR_COLORS = [
-  "hsl(var(--primary))",
-  "hsl(var(--chart-2))",
-  "hsl(var(--chart-5))",
-  "hsl(var(--success))",
-  "hsl(var(--warning))",
-];
+const BAR_COLORS = ["#2d63c8", "#356cd4", "#4275db", "#4f7ce0", "#5d85e5"];
 
 const truncateLabel = (value: string) =>
-  value.length > 16 ? `${value.slice(0, 16)}...` : value;
+  value.length > 12 ? `${value.slice(0, 12)}...` : value;
 
 const buildTopSellingData = (transactions: Transaction[]): TopSellingDatum[] => {
   const totals = new Map<string, { revenue: number; sales: number }>();
@@ -100,77 +95,64 @@ export function TopSellingChart() {
   const chartData = useMemo(() => buildTopSellingData(transactions), [transactions]);
 
   return (
-    <div className="chart-container animate-fade-in">
-      <div className="flex items-center justify-between gap-3 mb-4">
-        <h3 className="text-lg font-semibold text-foreground">Top Selling Products</h3>
-        {usingMockTransactions && (
-          <span className="text-xs text-muted-foreground">Using mock transactions</span>
-        )}
+    <div className="chart-container">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <h3 className="text-lg font-medium text-[#171717]">Top selling Products</h3>
+        {usingMockTransactions ? (
+          <span className="text-xs text-[#666]">Using seeded data</span>
+        ) : null}
       </div>
 
-      <div className="h-[300px]">
+      <div className="h-[260px] rounded-[4px] bg-[#8f8f8f] px-3 py-2">
         {isLoading ? (
-          <div className="flex items-center justify-center h-full">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          <div className="flex h-full items-center justify-center">
+            <Loader2 className="h-6 w-6 animate-spin text-white/70" />
           </div>
         ) : error ? (
-          <div className="flex h-full items-center justify-center rounded-lg border border-destructive/30 bg-destructive/10 px-4 text-center">
-            <p className="text-sm text-foreground">
-              Top-selling data could not be loaded from your transactions.
-            </p>
+          <div className="flex h-full items-center justify-center px-4 text-center text-sm text-white">
+            Top-selling data could not be loaded from your transactions.
           </div>
         ) : chartData.length === 0 ? (
-          <div className="flex h-full items-center justify-center rounded-lg border border-border bg-secondary/20 px-4 text-center">
-            <p className="text-sm text-muted-foreground">
-              Top-selling products will appear here after sale transactions are recorded.
-            </p>
+          <div className="flex h-full items-center justify-center px-4 text-center text-sm text-white">
+            Top-selling products will appear here after sale transactions are recorded.
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={chartData} layout="vertical" margin={{ left: 28, right: 20 }}>
-              <CartesianGrid
-                strokeDasharray="3 3"
-                stroke="hsl(var(--border))"
-                horizontal={true}
-                vertical={false}
-              />
+            <BarChart data={chartData} margin={{ bottom: 24, left: 0, right: 8, top: 10 }}>
+              <CartesianGrid stroke="#bcbcbc" strokeDasharray="0" vertical={false} />
               <XAxis
-                type="number"
-                allowDecimals={false}
-                stroke="hsl(var(--muted-foreground))"
-                fontSize={12}
+                dataKey="name"
+                angle={-28}
+                dy={18}
+                height={52}
+                interval={0}
+                stroke="#272727"
+                tick={{ fill: "#272727", fontSize: 10 }}
+                tickFormatter={truncateLabel}
+                tickLine={false}
               />
               <YAxis
-                type="category"
-                dataKey="name"
-                stroke="hsl(var(--muted-foreground))"
-                fontSize={12}
-                width={120}
+                allowDecimals={false}
+                stroke="#272727"
+                tick={{ fill: "#272727", fontSize: 10 }}
                 tickLine={false}
-                tickFormatter={truncateLabel}
               />
               <Tooltip
+                cursor={{ fill: "rgba(255,255,255,0.18)" }}
                 contentStyle={{
-                  backgroundColor: "hsl(var(--card))",
-                  border: "1px solid hsl(var(--border))",
-                  borderRadius: "8px",
-                  color: "hsl(var(--foreground))",
+                  backgroundColor: "#f7f4ef",
+                  border: "1px solid #d8cfc4",
+                  borderRadius: "4px",
+                  color: "#171717",
                 }}
-                itemStyle={{ color: "#fff" }}
-                labelStyle={{ color: "#fff" }}
-                cursor={{ fill: "hsl(var(--muted) / 0.3)" }}
                 formatter={(value: number) => [`${value} units`, "Sold"]}
                 labelFormatter={(label, payload) => {
                   const revenue = payload?.[0]?.payload?.revenue;
-
-                  if (typeof revenue !== "number") {
-                    return label;
-                  }
-
-                  return `${label} • ${formatCurrency(revenue)}`;
+                  return typeof revenue === "number" ? `${label} - ${formatCurrency(revenue)}` : label;
                 }}
               />
-              <Bar dataKey="sales" radius={[0, 4, 4, 0]}>
+              <Bar dataKey="sales" radius={[0, 0, 0, 0]}>
+                <LabelList dataKey="sales" position="top" fill="#f8f8f8" fontSize={10} />
                 {chartData.map((_, index) => (
                   <Cell
                     key={`cell-${index}`}
@@ -182,12 +164,6 @@ export function TopSellingChart() {
           </ResponsiveContainer>
         )}
       </div>
-
-      {!isLoading && !error && chartData.length > 0 && (
-        <p className="mt-4 text-xs text-muted-foreground">
-          Ranked by total units sold from recorded sale transactions.
-        </p>
-      )}
     </div>
   );
 }

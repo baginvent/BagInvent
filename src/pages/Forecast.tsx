@@ -1,36 +1,29 @@
-import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { useEffect, useMemo, useState } from "react";
 import {
-  LineChart,
+  CartesianGrid,
+  Legend,
   Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
 } from "recharts";
-import {
-  Brain,
-  TrendingUp,
-  AlertTriangle,
-  Lightbulb,
-  Recycle,
-  Clock,
-  ShoppingCart,
-  Calendar,
-  Loader2,
-} from "lucide-react";
+import { AlertTriangle, Brain, Clock, Loader2 } from "lucide-react";
+import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
-import { useEffect, useMemo, useState } from "react";
-import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
 import { useAuthContext } from "@/contexts/AuthContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ensureDemoInventoryAndTransactions, isMissingTransactionsTableError } from "@/lib/demoData";
+import {
+  ensureDemoInventoryAndTransactions,
+  isMissingTransactionsTableError,
+} from "@/lib/demoData";
 import {
   buildInsights,
+  buildDemandPlanningResult,
   buildMockTransactions,
   buildRecommendations,
   buildWasteAlerts,
@@ -39,10 +32,29 @@ import {
   formatCurrency,
   generateForecastData,
   mapTransactionsToForecastData,
+  type ForecastConfidence,
 } from "@/lib/forecastInsights";
 
 type Product = Tables<"products">;
 type Transaction = Tables<"transactions">;
+
+const demandLevelStyles = {
+  "High demand": "bg-[#d7f6e3] text-[#2f7b54]",
+  "Medium demand": "bg-[#fff2ab] text-[#8a6b08]",
+  "Low demand": "bg-[#ffd9d9] text-[#b34d4d]",
+} as const;
+
+const stockDecisionStyles = {
+  "Increase stock": "bg-[#d7f6e3] text-[#2f7b54]",
+  "Maintain stock": "bg-[#fff2ab] text-[#8a6b08]",
+  "Reduce stock": "bg-[#ffd9d9] text-[#b34d4d]",
+} as const;
+
+const confidenceStyles: Record<ForecastConfidence, string> = {
+  high: "bg-[#d7f6e3] text-[#2f7b54]",
+  low: "bg-[#ffd9d9] text-[#b34d4d]",
+  medium: "bg-[#fff2ab] text-[#8a6b08]",
+};
 
 export default function Forecast() {
   const [selectedCategory, setSelectedCategory] = useState("All");
@@ -66,7 +78,6 @@ export default function Forecast() {
         if (!active) return;
 
         if (result.seededProducts || result.seededTransactions) {
-          toast.success("Forecast insights updated from your current data.");
           queryClient.invalidateQueries({ queryKey: ["products", user.id] });
           queryClient.invalidateQueries({ queryKey: ["transactions", user.id] });
         }
@@ -200,7 +211,8 @@ export default function Forecast() {
         .filter((product) => product.quantity <= 10)
         .sort(
           (left, right) =>
-            (salesByProduct.get(right.name)?.quantity ?? 0) - (salesByProduct.get(left.name)?.quantity ?? 0),
+            (salesByProduct.get(right.name)?.quantity ?? 0) -
+            (salesByProduct.get(left.name)?.quantity ?? 0),
         )[0],
     [salesByProduct, scopedProducts],
   );
@@ -211,7 +223,8 @@ export default function Forecast() {
         .filter((product) => product.quantity >= 20)
         .sort(
           (left, right) =>
-            (salesByProduct.get(left.name)?.quantity ?? 0) - (salesByProduct.get(right.name)?.quantity ?? 0),
+            (salesByProduct.get(left.name)?.quantity ?? 0) -
+            (salesByProduct.get(right.name)?.quantity ?? 0),
         )[0],
     [salesByProduct, scopedProducts],
   );
@@ -249,147 +262,106 @@ export default function Forecast() {
     () => buildWasteTips({ expiryAlerts: wasteAlerts, lowStockProduct, overstockProduct }),
     [lowStockProduct, overstockProduct, wasteAlerts],
   );
+  const demandPlanning = useMemo(
+    () =>
+      buildDemandPlanningResult({
+        periodDays: 7,
+        products: scopedProducts,
+        transactions: scopedTransactions,
+      }),
+    [scopedProducts, scopedTransactions],
+  );
 
   const isLoading = isProductsLoading || isTransactionsLoading || isSeeding;
   const hasLoadError = Boolean(productsError || transactionsError);
 
   return (
-    <DashboardLayout>
+    <DashboardLayout pageLabel="AI Demand Forecasting">
       <div className="space-y-6">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold text-foreground">AI Forecast</h1>
-            <p className="text-muted-foreground mt-1">
-              AI-powered demand predictions and insights based on your current inventory and transaction history.
-            </p>
-          </div>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <h1 className="text-[2rem] font-medium text-[#171717]">AI Demand Forecasting</h1>
           <Button
-            className="bg-primary hover:bg-primary/90 text-primary-foreground animate-pulse-glow"
+            className="h-10 rounded-[4px] bg-[#cf5a5a] px-5 text-white hover:bg-[#c55252]"
             onClick={() => setForecastVersion((currentValue) => currentValue + 1)}
             disabled={isLoading || hasLoadError}
           >
-            <Brain className="w-4 h-4 mr-2" />
-            Generate New Forecast
+            <Brain className="mr-2 h-4 w-4" />
+            Refresh Forecast
           </Button>
         </div>
 
-        {usingMockTransactions && !hasLoadError && (
-          <div className="rounded-lg border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
+        {usingMockTransactions && !hasLoadError ? (
+          <div className="workspace-card-soft text-sm text-[#666]">
             Forecast insights are currently using seeded mock transaction history.
           </div>
-        )}
+        ) : null}
 
-        {hasLoadError && (
-          <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-foreground">
-            Forecast data could not be loaded. Refresh after your inventory and transactions tables are available.
+        {hasLoadError ? (
+          <div className="workspace-card-soft text-sm text-[#b34d4d]">
+            Forecast data could not be loaded. Refresh after your inventory and transactions
+            tables are available.
           </div>
-        )}
+        ) : null}
 
         {isLoading ? (
-          <div className="chart-container">
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          <div className="workspace-panel">
+            <div className="flex items-center justify-center py-16">
+              <Loader2 className="h-6 w-6 animate-spin text-[#666]" />
             </div>
           </div>
         ) : (
           <>
-            <div className="chart-container">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="p-2 bg-primary/10 rounded-lg">
-                  <Brain className="w-5 h-5 text-primary" />
-                </div>
-                <h3 className="text-lg font-semibold text-foreground">AI Insights Summary</h3>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {aiInsights.map((insight, index) => (
-                  <div key={index} className="insight-card flex items-start gap-3">
-                    <insight.icon
-                      className={cn(
-                        "w-5 h-5 mt-0.5",
-                        insight.type === "increase" && "text-success",
-                        insight.type === "overstock" && "text-warning",
-                        insight.type === "expiry" && "text-destructive",
-                      )}
-                    />
-                    <p className="text-sm text-foreground">{insight.text}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="chart-container">
-                <h3 className="text-lg font-semibold text-foreground mb-4">Sales Trends</h3>
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between p-3 bg-secondary/30 rounded-lg">
-                    <div className="flex items-center gap-2">
-                      <TrendingUp className={cn("w-4 h-4", salesTrends.growth >= 0 ? "text-success" : "text-destructive")} />
-                      <span className="text-sm text-muted-foreground">Weekly Growth</span>
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+              <div className="workspace-panel">
+                <h2 className="text-lg font-medium text-[#171717]">AI Insight Summary</h2>
+                <div className="mt-4 space-y-4 text-sm text-[#333]">
+                  {aiInsights.map((insight) => (
+                    <div key={insight.text} className="space-y-1">
+                      <p>{insight.text}</p>
                     </div>
-                    <span className={cn("text-lg font-bold", salesTrends.growth >= 0 ? "text-success" : "text-destructive")}>
+                  ))}
+                </div>
+              </div>
+
+              <div className="workspace-panel">
+                <h2 className="text-lg font-medium text-[#171717]">Sales Trends</h2>
+                <div className="mt-4 grid grid-cols-2 gap-4 text-[#171717]">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.16em] text-[#666]">Weekly Growth</p>
+                    <p className="mt-2 text-2xl font-medium">
                       {salesTrends.growth >= 0 ? "+" : ""}
                       {salesTrends.growth}%
-                    </span>
+                    </p>
                   </div>
-                  <div className="flex items-center justify-between p-3 bg-secondary/30 rounded-lg">
-                    <div className="flex items-center gap-2">
-                      <Clock className="w-4 h-4 text-chart-2" />
-                      <span className="text-sm text-muted-foreground">Peak Hour</span>
-                    </div>
-                    <span className="text-lg font-bold text-foreground">{salesTrends.peakHour}</span>
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.16em] text-[#666]">Best Day</p>
+                    <p className="mt-2 text-2xl font-medium">{salesTrends.bestDay}</p>
                   </div>
-                  <div className="flex items-center justify-between p-3 bg-secondary/30 rounded-lg">
-                    <div className="flex items-center gap-2">
-                      <Calendar className="w-4 h-4 text-chart-5" />
-                      <span className="text-sm text-muted-foreground">Best Day</span>
-                    </div>
-                    <span className="text-lg font-bold text-foreground">{salesTrends.bestDay}</span>
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.16em] text-[#666]">Peak Hour</p>
+                    <p className="mt-2 text-2xl font-medium">{salesTrends.peakHour}</p>
                   </div>
-                  <div className="flex items-center justify-between p-3 bg-secondary/30 rounded-lg">
-                    <div className="flex items-center gap-2">
-                      <ShoppingCart className="w-4 h-4 text-primary" />
-                      <span className="text-sm text-muted-foreground">Avg Basket</span>
-                    </div>
-                    <span className="text-lg font-bold text-foreground">{formatCurrency(salesTrends.avgBasket)}</span>
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.16em] text-[#666]">Avg. Basket</p>
+                    <p className="mt-2 text-2xl font-medium">{formatCurrency(salesTrends.avgBasket)}</p>
                   </div>
                 </div>
               </div>
 
-              <div className="chart-container lg:col-span-2">
-                <div className="flex items-center gap-2 mb-4">
-                  <AlertTriangle className="w-5 h-5 text-warning" />
-                  <h3 className="text-lg font-semibold text-foreground">Waste Alerts</h3>
-                </div>
-                <div className="space-y-3">
+              <div className="workspace-panel">
+                <h2 className="text-lg font-medium text-[#171717]">Waste Alerts</h2>
+                <div className="mt-4 space-y-4">
                   {wasteAlerts.length === 0 ? (
-                    <div className="rounded-lg border border-border bg-secondary/20 p-4">
-                      <p className="text-sm text-muted-foreground">
-                        No products are currently nearing expiry in the selected inventory scope.
-                      </p>
-                    </div>
+                    <p className="text-sm text-[#666]">
+                      No products are currently nearing expiry in the selected inventory scope.
+                    </p>
                   ) : (
-                    wasteAlerts.map((alert, index) => (
-                      <div
-                        key={index}
-                        className={cn(
-                          "flex items-center justify-between p-3 rounded-lg border",
-                          alert.urgency === "high" ? "bg-destructive/10 border-destructive/30" : "bg-warning/10 border-warning/30",
-                        )}
-                      >
-                        <div>
-                          <p className="font-medium text-foreground">{alert.product}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {alert.quantity} units | Expires {alert.expiry}
-                          </p>
-                        </div>
-                        <span
-                          className={cn(
-                            "px-2 py-1 rounded text-xs font-medium",
-                            alert.urgency === "high" ? "bg-destructive text-destructive-foreground" : "bg-warning text-warning-foreground",
-                          )}
-                        >
-                          {alert.urgency === "high" ? "Urgent" : "Warning"}
-                        </span>
+                    wasteAlerts.map((alert) => (
+                      <div key={`${alert.product}-${alert.expiry}`} className="space-y-1">
+                        <p className="text-sm text-[#333]">
+                          {alert.product} ({alert.quantity} units)
+                        </p>
+                        <p className="text-xs text-[#c45c5c]">Expires in {alert.expiry}</p>
                       </div>
                     ))
                   )}
@@ -397,82 +369,221 @@ export default function Forecast() {
               </div>
             </div>
 
-            <div className="chart-container">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-                <h3 className="text-lg font-semibold text-foreground">30-Day Demand Forecast</h3>
+            <div className="workspace-panel">
+              <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <h2 className="text-lg font-medium text-[#171717]">30-Day Demand Forecast</h2>
                 <div className="flex flex-wrap gap-2">
                   {categories.map((category) => (
                     <button
                       key={category}
                       onClick={() => setSelectedCategory(category)}
-                      className={cn(
-                        "px-3 py-1.5 rounded-full text-sm font-medium transition-all",
-                        selectedCategory === category ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground hover:bg-secondary/80",
-                      )}
+                      className={
+                        selectedCategory === category
+                          ? "rounded-full bg-[#cf5a5a] px-4 py-1.5 text-xs font-medium text-white"
+                          : "rounded-full bg-[#efebe6] px-4 py-1.5 text-xs font-medium text-[#171717]"
+                      }
                     >
                       {category}
                     </button>
                   ))}
                 </div>
               </div>
-              <div className="h-[350px]">
+              <div className="h-[340px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={forecastData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis dataKey="day" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                    <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                    <CartesianGrid stroke="#979797" strokeDasharray="0" vertical={false} />
+                    <XAxis dataKey="day" stroke="#3a3a3a" fontSize={11} tickLine={false} />
+                    <YAxis stroke="#3a3a3a" fontSize={11} tickLine={false} />
                     <Tooltip
                       contentStyle={{
-                        backgroundColor: "hsl(var(--card))",
-                        border: "1px solid hsl(var(--border))",
-                        borderRadius: "8px",
-                        color: "hsl(var(--foreground))",
+                        backgroundColor: "#f7f4ef",
+                        border: "1px solid #d8cfc4",
+                        borderRadius: "4px",
+                        color: "#171717",
                       }}
                     />
                     <Legend />
-                    <Line type="monotone" dataKey="predicted" name="Predicted Demand" stroke="hsl(var(--primary))" strokeWidth={3} dot={{ fill: "hsl(var(--primary))", strokeWidth: 2 }} activeDot={{ r: 6 }} />
-                    <Line type="monotone" dataKey="historical" name="Historical Baseline" stroke="hsl(var(--muted-foreground))" strokeWidth={2} strokeDasharray="5 5" dot={{ fill: "hsl(var(--muted-foreground))", strokeWidth: 1 }} />
+                    <Line
+                      type="monotone"
+                      dataKey="predicted"
+                      name="Predicted Demand"
+                      stroke="#5642a5"
+                      strokeWidth={2.5}
+                      dot={false}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="historical"
+                      name="Average"
+                      stroke="#58c85c"
+                      strokeWidth={2}
+                      dot={false}
+                    />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div className="chart-container">
-                <div className="flex items-center gap-2 mb-4">
-                  <Lightbulb className="w-5 h-5 text-warning" />
-                  <h3 className="text-lg font-semibold text-foreground">AI Recommended Actions</h3>
+            <div className="grid grid-cols-1 gap-6 xl:grid-cols-[0.95fr_1.05fr]">
+              <div className="workspace-panel">
+                <h2 className="text-lg font-medium text-[#171717]">Forecast Method And Assumptions</h2>
+                <div className="mt-4 space-y-4">
+                  <div>
+                    <p className="text-sm font-medium text-[#171717]">Methodology</p>
+                    <div className="mt-2 space-y-2">
+                      {demandPlanning.methodology.map((item) => (
+                        <p key={item} className="text-sm text-[#555]">
+                          {item}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-[#171717]">Assumptions</p>
+                    <div className="mt-2 space-y-2">
+                      {demandPlanning.assumptions.map((item) => (
+                        <p key={item} className="text-sm text-[#555]">
+                          {item}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
                 </div>
-                <div className="space-y-3">
-                  {recommendations.length === 0 ? (
-                    <div className="rounded-lg border border-border bg-secondary/20 p-4">
-                      <p className="text-sm text-muted-foreground">
-                        Recommendations will appear as soon as the system detects stock pressure or expiry risk.
+              </div>
+
+              <div className="workspace-panel">
+                <h2 className="text-lg font-medium text-[#171717]">Key Insights</h2>
+                <div className="mt-4 space-y-3">
+                  {demandPlanning.insights.map((insight) => (
+                    <div key={insight} className="workspace-card-soft">
+                      <p className="text-sm text-[#333]">{insight}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="workspace-panel">
+              <div className="mb-4 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <h2 className="text-lg font-medium text-[#171717]">
+                    Demand Forecast By Product
+                  </h2>
+                  <p className="text-sm text-[#666]">
+                    Forecast horizon: next {demandPlanning.periodDays} days
+                  </p>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[920px] border-collapse">
+                  <thead>
+                    <tr className="border-b border-white/40 text-left">
+                      <th className="px-3 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-[#555]">
+                        Product
+                      </th>
+                      <th className="px-3 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-[#555]">
+                        Category
+                      </th>
+                      <th className="px-3 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-[#555]">
+                        Forecast
+                      </th>
+                      <th className="px-3 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-[#555]">
+                        Trend
+                      </th>
+                      <th className="px-3 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-[#555]">
+                        Demand
+                      </th>
+                      <th className="px-3 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-[#555]">
+                        Action
+                      </th>
+                      <th className="px-3 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-[#555]">
+                        Inventory
+                      </th>
+                      <th className="px-3 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-[#555]">
+                        Coverage
+                      </th>
+                      <th className="px-3 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-[#555]">
+                        Confidence
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {demandPlanning.productForecasts.map((forecast) => (
+                      <tr key={forecast.productId} className="border-b border-white/20 align-top">
+                        <td className="px-3 py-4">
+                          <p className="font-medium text-[#171717]">{forecast.productName}</p>
+                          <p className="mt-1 text-xs text-[#666]">{forecast.reasoning}</p>
+                        </td>
+                        <td className="px-3 py-4 text-sm text-[#333]">{forecast.category}</td>
+                        <td className="px-3 py-4">
+                          <p className="font-medium text-[#171717]">
+                            {forecast.forecastNextPeriod} units
+                          </p>
+                          <p className="text-xs text-[#666]">
+                            {forecast.forecastDailyAverage}/day
+                          </p>
+                        </td>
+                        <td className="px-3 py-4 text-sm text-[#333]">
+                          {forecast.trendPct >= 0 ? "+" : ""}
+                          {forecast.trendPct}%
+                        </td>
+                        <td className="px-3 py-4">
+                          <span
+                            className={`inline-flex rounded-full px-3 py-1 text-xs font-medium ${demandLevelStyles[forecast.demandLevel]}`}
+                          >
+                            {forecast.demandLevel}
+                          </span>
+                        </td>
+                        <td className="px-3 py-4">
+                          <span
+                            className={`inline-flex rounded-full px-3 py-1 text-xs font-medium ${stockDecisionStyles[forecast.stockDecision]}`}
+                          >
+                            {forecast.stockDecision}
+                          </span>
+                        </td>
+                        <td className="px-3 py-4 text-sm text-[#333]">
+                          {forecast.currentInventory ?? "N/A"}
+                        </td>
+                        <td className="px-3 py-4 text-sm text-[#333]">
+                          {forecast.inventoryCoverageDays !== null
+                            ? `${forecast.inventoryCoverageDays} days`
+                            : "N/A"}
+                        </td>
+                        <td className="px-3 py-4">
+                          <span
+                            className={`inline-flex rounded-full px-3 py-1 text-xs font-medium uppercase ${confidenceStyles[forecast.confidence]}`}
+                          >
+                            {forecast.confidence}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+              <div className="workspace-panel">
+                <h2 className="text-lg font-medium text-[#171717]">Top Products To BUY MORE</h2>
+                <div className="mt-4 space-y-3">
+                  {demandPlanning.buyMore.length === 0 ? (
+                    <div className="workspace-card-soft">
+                      <p className="text-sm text-[#555]">
+                        No urgent restock candidates were identified from the current forecast.
                       </p>
                     </div>
                   ) : (
-                    recommendations.map((recommendation, index) => (
-                      <div key={index} className="insight-card">
-                        <div className="flex items-start justify-between">
+                    demandPlanning.buyMore.map((item) => (
+                      <div key={item.productName} className="workspace-card-soft">
+                        <div className="flex items-start justify-between gap-3">
                           <div>
-                            <div className="flex items-center gap-2">
-                              <span
-                                className={cn(
-                                  "px-2 py-0.5 rounded text-xs font-bold",
-                                  recommendation.action === "Restock" && "bg-success/20 text-success",
-                                  recommendation.action === "Reduce" && "bg-warning/20 text-warning",
-                                  recommendation.action === "Promote" && "bg-chart-2/20 text-chart-2",
-                                  recommendation.action === "Bundle" && "bg-chart-5/20 text-chart-5",
-                                )}
-                              >
-                                {recommendation.action}
-                              </span>
-                              <span className="font-medium text-foreground">{recommendation.product}</span>
-                            </div>
-                            <p className="text-sm text-muted-foreground mt-1">{recommendation.reason}</p>
+                            <p className="font-medium text-[#171717]">{item.productName}</p>
+                            <p className="mt-1 text-sm text-[#555]">{item.reason}</p>
                           </div>
-                          <span className={cn("text-xs px-2 py-1 rounded-full", recommendation.priority === "high" ? "bg-destructive/20 text-destructive" : "bg-muted text-muted-foreground")}>
-                            {recommendation.priority}
+                          <span className="rounded-full bg-[#d7f6e3] px-3 py-1 text-xs font-medium text-[#2f7b54]">
+                            Buy More
                           </span>
                         </div>
                       </div>
@@ -481,23 +592,68 @@ export default function Forecast() {
                 </div>
               </div>
 
-              <div className="chart-container">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="p-2 bg-primary/10 rounded-lg">
-                    <Recycle className="w-5 h-5 text-success" />
-                  </div>
-                  <h3 className="text-lg font-semibold text-foreground">Waste Reduction Tips</h3>
+              <div className="workspace-panel">
+                <h2 className="text-lg font-medium text-[#171717]">Top Products To BUY LESS</h2>
+                <div className="mt-4 space-y-3">
+                  {demandPlanning.buyLess.length === 0 ? (
+                    <div className="workspace-card-soft">
+                      <p className="text-sm text-[#555]">
+                        No clear reduction candidates were identified from the current forecast.
+                      </p>
+                    </div>
+                  ) : (
+                    demandPlanning.buyLess.map((item) => (
+                      <div key={item.productName} className="workspace-card-soft">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-medium text-[#171717]">{item.productName}</p>
+                            <p className="mt-1 text-sm text-[#555]">{item.reason}</p>
+                          </div>
+                          <span className="rounded-full bg-[#ffd9d9] px-3 py-1 text-xs font-medium text-[#b34d4d]">
+                            Buy Less
+                          </span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.05fr_1fr]">
+              <div className="workspace-panel">
+                <div className="mb-4 flex items-center gap-2">
+                  <AlertTriangle className="h-5 w-5 text-[#cf5a5a]" />
+                  <h2 className="text-lg font-medium text-[#171717]">AI Recommended Actions</h2>
                 </div>
                 <div className="space-y-3">
-                  {wasteTips.map((item, index) => (
-                    <div key={index} className="insight-card">
-                      <p className="font-medium text-foreground">{item.tip}</p>
-                      <p className="text-sm text-muted-foreground mt-1">{item.description}</p>
+                  {recommendations.map((recommendation) => (
+                    <div key={`${recommendation.action}-${recommendation.product}`} className="workspace-card-soft">
+                      <p className="font-medium text-[#171717]">
+                        {recommendation.action} {recommendation.product}
+                      </p>
+                      <p className="mt-1 text-sm text-[#555]">{recommendation.reason}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="workspace-panel">
+                <div className="mb-4 flex items-center gap-3">
+                  <Clock className="h-5 w-5 text-[#666]" />
+                  <h2 className="text-lg font-medium text-[#171717]">Waste Prevention Tips</h2>
+                </div>
+                <div className="space-y-5">
+                  {wasteTips.map((item) => (
+                    <div key={item.tip}>
+                      <p className="font-medium text-[#171717]">{item.tip}</p>
+                      <p className="mt-1 text-sm text-[#555]">{item.description}</p>
                     </div>
                   ))}
                 </div>
               </div>
             </div>
+
           </>
         )}
       </div>

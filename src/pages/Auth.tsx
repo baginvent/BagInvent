@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Store, Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff } from "lucide-react";
+import { AuthShell } from "@/components/auth/AuthShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,6 +17,9 @@ export default function Auth() {
     email: "",
     password: "",
   });
+
+  const inputClassName =
+    "h-11 rounded-none border-0 bg-[#e4e4e4] text-[#171717] shadow-none focus-visible:ring-1 focus-visible:ring-[#cf5a5a] focus-visible:ring-offset-0";
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -50,29 +54,11 @@ export default function Auth() {
   };
 
   return (
-    <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4">
-      <div className="flex items-center gap-3 mb-8">
-        <div className="w-12 h-12 bg-primary rounded-lg flex items-center justify-center">
-          <Store className="w-7 h-7 text-primary-foreground" />
-        </div>
-        <div>
-          <h1 className="text-xl font-bold text-primary">BAG-INVENT</h1>
-          <p className="text-xs text-muted-foreground">AI-Powered</p>
-          <p className="text-xs text-muted-foreground">Inventory Management</p>
-        </div>
-      </div>
-
-      <div className="w-full max-w-md bg-[#2a2a2a] rounded-lg p-8">
-        <div className="mb-6">
-          <h2 className="text-lg font-semibold text-foreground">Email Authentication</h2>
-          <p className="text-sm text-muted-foreground mt-2">
-            Enter your email and password to access your dashboard.
-          </p>
-        </div>
-
+    <AuthShell eyebrow="Log in" formWidthClassName="max-w-[460px]">
+      <div className="bg-[#231f20] p-4 shadow-[0_20px_40px_rgba(0,0,0,0.25)] sm:p-5">
         <form onSubmit={handleSubmit} className="space-y-5">
           <div className="space-y-2">
-            <Label htmlFor="email" className="text-muted-foreground text-sm">
+            <Label htmlFor="email" className="text-sm font-medium text-[#f4efe8]">
               Email
             </Label>
             <Input
@@ -80,13 +66,13 @@ export default function Auth() {
               type="email"
               value={formData.email}
               onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              className="bg-[#e5e5e5] border-0 text-[#1a1a1a] h-11"
+              className={inputClassName}
               required
             />
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="password" className="text-muted-foreground text-sm">
+            <Label htmlFor="password" className="text-sm font-medium text-[#f4efe8]">
               Password
             </Label>
             <div className="relative">
@@ -95,7 +81,7 @@ export default function Auth() {
                 type={showPassword ? "text" : "password"}
                 value={formData.password}
                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                className="bg-[#e5e5e5] border-0 text-[#1a1a1a] h-11 pr-10"
+                className={`${inputClassName} pr-10`}
                 required
               />
               <button
@@ -103,7 +89,7 @@ export default function Auth() {
                 onClick={() => setShowPassword(!showPassword)}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-[#666]"
               >
-                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
           </div>
@@ -111,27 +97,21 @@ export default function Auth() {
           <Button
             type="submit"
             disabled={isLoading}
-            className="w-full bg-primary hover:bg-primary/90 text-primary-foreground h-11 font-medium"
+            className="h-11 w-full rounded-none bg-[#cf5a5a] font-medium text-white hover:bg-[#c55252]"
           >
-            {isLoading ? "Signing in..." : "Log In"}
+            {isLoading ? "Signing in..." : "Log in"}
           </Button>
         </form>
 
-        <div className="flex justify-between mt-6">
-          <Link
-            to="/forgot-password"
-            className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-          >
+        <div className="mt-5 flex items-center justify-between gap-3 text-sm text-[#f4efe8]">
+          <Link to="/forgot-password" className="transition-colors hover:text-white">
             Forgot password?
           </Link>
-          <Link
-            to="/signup"
-            className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-          >
+          <Link to="/signup" className="transition-colors hover:text-white">
             Sign up
           </Link>
         </div>
       </div>
-    </div>
+    </AuthShell>
   );
 }

@@ -2,61 +2,59 @@
 @tailwind components;
 @tailwind utilities;
 
-/* BAG-INVENT Design System - Dark Dashboard Theme */
-
 @layer base {
   :root {
-    --background: 220 20% 7%;
-    --foreground: 0 0% 98%;
+    --background: 18 8% 13%;
+    --foreground: 22 7% 11%;
 
-    --card: 220 18% 10%;
-    --card-foreground: 0 0% 98%;
+    --card: 0 0% 100%;
+    --card-foreground: 22 7% 11%;
 
-    --popover: 220 18% 12%;
-    --popover-foreground: 0 0% 98%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 22 7% 11%;
 
-    --primary: 0 85% 50%;
+    --primary: 0 53% 58%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 220 15% 18%;
-    --secondary-foreground: 0 0% 90%;
+    --secondary: 0 0% 86%;
+    --secondary-foreground: 22 7% 14%;
 
-    --muted: 220 15% 15%;
-    --muted-foreground: 220 10% 55%;
+    --muted: 28 22% 95%;
+    --muted-foreground: 24 5% 39%;
 
-    --accent: 220 15% 20%;
-    --accent-foreground: 0 0% 98%;
+    --accent: 28 22% 92%;
+    --accent-foreground: 22 7% 14%;
 
-    --destructive: 0 72% 51%;
+    --destructive: 0 71% 62%;
     --destructive-foreground: 0 0% 100%;
 
-    --success: 142 76% 36%;
+    --success: 143 53% 46%;
     --success-foreground: 0 0% 100%;
 
-    --warning: 38 92% 50%;
-    --warning-foreground: 0 0% 0%;
+    --warning: 47 92% 62%;
+    --warning-foreground: 22 9% 17%;
 
-    --border: 220 15% 18%;
-    --input: 220 15% 18%;
-    --ring: 0 85% 50%;
+    --border: 26 16% 85%;
+    --input: 26 16% 85%;
+    --ring: 0 53% 58%;
 
     --radius: 0.5rem;
 
-    --sidebar-background: 220 20% 6%;
-    --sidebar-foreground: 220 10% 60%;
-    --sidebar-primary: 0 85% 50%;
+    --sidebar-background: 18 8% 13%;
+    --sidebar-foreground: 30 18% 91%;
+    --sidebar-primary: 0 53% 58%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 0 85% 50%;
+    --sidebar-accent: 0 53% 58%;
     --sidebar-accent-foreground: 0 0% 100%;
-    --sidebar-border: 220 15% 12%;
-    --sidebar-ring: 0 85% 50%;
-    --sidebar-muted: 220 15% 25%;
+    --sidebar-border: 20 7% 20%;
+    --sidebar-ring: 0 53% 58%;
+    --sidebar-muted: 18 8% 19%;
 
-    --chart-1: 0 85% 50%;
-    --chart-2: 220 70% 50%;
-    --chart-3: 142 76% 36%;
-    --chart-4: 38 92% 50%;
-    --chart-5: 280 65% 60%;
+    --chart-1: 218 61% 49%;
+    --chart-2: 249 46% 43%;
+    --chart-3: 126 49% 58%;
+    --chart-4: 0 71% 62%;
+    --chart-5: 39 83% 62%;
   }
 }
 
@@ -67,44 +65,67 @@
 
   body {
     @apply bg-background text-foreground;
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
   }
 }
 
 @layer utilities {
-  .glass-card {
-    @apply bg-card/80 backdrop-blur-sm border border-border/50;
-  }
-  
   .stat-card {
-    @apply bg-card rounded-xl p-5 border border-border/50 transition-all duration-200 hover:border-primary/30;
+    @apply rounded-[4px] bg-[#d9d9d9] p-4 text-[#171717] shadow-sm;
   }
-  
-  .nav-item {
-    @apply flex items-center gap-3 px-4 py-3 rounded-lg text-sidebar-foreground transition-all duration-200 hover:bg-sidebar-muted/50;
-  }
-  
-  .nav-item-active {
-    @apply bg-primary text-primary-foreground hover:bg-primary;
-  }
-  
+
   .chart-container {
-    @apply bg-card rounded-xl p-6 border border-border/50;
+    @apply rounded-[4px] bg-[#d9d9d9] p-5 text-[#171717] shadow-sm;
   }
-  
+
   .insight-card {
-    @apply bg-secondary/50 rounded-lg p-4 border border-border/30;
+    @apply rounded-[4px] bg-[#ece9e5] p-4 text-[#171717];
   }
-  
+
+  .workspace-panel {
+    @apply rounded-[4px] bg-[#d9d9d9] p-5 text-[#171717] shadow-sm;
+  }
+
+  .workspace-card {
+    @apply rounded-[4px] bg-[#d9d9d9] p-4 text-[#171717] shadow-sm;
+  }
+
+  .workspace-card-soft {
+    @apply rounded-[4px] bg-[#ece9e5] p-4 text-[#171717] shadow-sm;
+  }
+
+  .workspace-table {
+    @apply overflow-hidden rounded-[4px] bg-[#d9d9d9] p-3 shadow-sm;
+  }
+
+  .workspace-action {
+    @apply inline-flex items-center justify-center rounded-full bg-[#d8d8d8] px-5 py-2 text-xs font-medium text-[#171717] transition-colors hover:bg-[#cfcfcf];
+  }
+
+  .soft-badge {
+    @apply inline-flex items-center rounded-full px-3 py-1 text-[10px] font-semibold tracking-wide;
+  }
+
   .status-low {
-    @apply text-destructive bg-destructive/10 px-2 py-0.5 rounded-full text-xs font-medium;
+    @apply rounded-full bg-[#ffd9d9] px-2 py-0.5 text-xs font-medium text-[#b34d4d];
   }
-  
+
   .status-normal {
-    @apply text-success bg-success/10 px-2 py-0.5 rounded-full text-xs font-medium;
+    @apply rounded-full bg-[#d7f6e3] px-2 py-0.5 text-xs font-medium text-[#2f7b54];
   }
-  
+
   .status-warning {
-    @apply text-warning bg-warning/10 px-2 py-0.5 rounded-full text-xs font-medium;
+    @apply rounded-full bg-[#fff2ab] px-2 py-0.5 text-xs font-medium text-[#8a6b08];
+  }
+
+  .product-thumb {
+    @apply flex h-10 w-10 items-center justify-center rounded-[4px] bg-white text-xs font-semibold text-[#171717] shadow-sm;
   }
 }
