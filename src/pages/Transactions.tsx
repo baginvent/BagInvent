@@ -1562,12 +1562,6 @@ export default function Transactions() {
             </div>
           )}
         </section>
-
-        {usingMockTransactions ? (
-          <div className="workspace-card-soft text-sm text-[#666]">
-            Some transaction history is currently sourced from local seeded data.
-          </div>
-        ) : null}
       </div>
     </DashboardLayout>
   );

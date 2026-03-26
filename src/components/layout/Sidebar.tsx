@@ -54,7 +54,7 @@ export function Sidebar() {
         </div>
       </div>
 
-      <nav className="flex-1 space-y-1 pb-4">
+      <nav className="flex-1 space-y-1 overflow-y-auto pb-20">
         {navItems.map((item) => {
           const isActive = location.pathname === item.path;
           const Icon = item.icon;
@@ -77,7 +77,7 @@ export function Sidebar() {
         })}
       </nav>
 
-      <div className="mt-auto border-t border-white/10 p-3">
+      <div className="fixed bottom-0 left-0 md:w-[220px] border-t border-white/10 bg-[#231f20] p-3">
         <button
           onClick={signOut}
           className="flex w-full items-center gap-3 px-4 py-2.5 text-[11px] font-medium text-[#f2ece4] transition-colors hover:bg-white/5"
