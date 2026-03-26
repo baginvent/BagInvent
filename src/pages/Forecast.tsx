@@ -290,12 +290,6 @@ export default function Forecast() {
           </Button>
         </div>
 
-        {usingMockTransactions && !hasLoadError ? (
-          <div className="workspace-card-soft text-sm text-[#666]">
-            Forecast insights are currently using seeded mock transaction history.
-          </div>
-        ) : null}
-
         {hasLoadError ? (
           <div className="workspace-card-soft text-sm text-[#b34d4d]">
             Forecast data could not be loaded. Refresh after your inventory and transactions
