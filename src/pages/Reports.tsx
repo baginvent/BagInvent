@@ -227,12 +227,6 @@ export default function Reports() {
           <h1 className="text-[2rem] font-medium text-[#171717]">Reports</h1>
         </div>
 
-        {usingMockTransactions && !hasLoadError ? (
-          <div className="workspace-card-soft text-sm text-[#666]">
-            Reports are currently using seeded mock transaction history.
-          </div>
-        ) : null}
-
         {hasLoadError ? (
           <div className="workspace-card-soft text-sm text-[#b34d4d]">
             Report data could not be loaded. Refresh after your inventory and transactions tables
