@@ -951,10 +951,7 @@ export default function Transactions() {
   const fieldClassName =
     "h-11 rounded-[4px] border-0 bg-[#d8d8d8] text-[#171717] placeholder:text-[#787878] focus-visible:ring-1 focus-visible:ring-[#cf5a5a]";
   const pageTitle = form.type === "incoming" ? "Add Product" : "Record Sale";
-  const pageDescription =
-    form.type === "incoming"
-      ? "Register newly received stock batches, preserve expiry dates, and keep your inventory log aligned."
-      : "Record outgoing sales from current stock using the same transaction workflow and FIFO inventory matching.";
+  const pageDescription = "";
 
   return (
     <DashboardLayout pageLabel="Transactions">
