@@ -1,4 +1,15 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  endOfMonth,
+  endOfWeek,
+  format,
+  isAfter,
+  isBefore,
+  isEqual,
+  parseISO,
+  startOfMonth,
+  startOfWeek,
+} from "date-fns";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import {
@@ -12,13 +23,16 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { Input } from "@/components/ui/input";
 import { useAuthContext } from "@/contexts/AuthContext";
 import { isMissingTransactionsTableError } from "@/lib/demoData";
 import { buildMockTransactions, formatCurrency } from "@/lib/forecastInsights";
 import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
+import { cn } from "@/lib/utils";
 
 type Transaction = Tables<"transactions">;
+type DateFilterType = "all" | "week" | "month" | "custom";
 
 type TopSellingDatum = {
   name: string;
@@ -26,10 +40,161 @@ type TopSellingDatum = {
   sales: number;
 };
 
+const EMPTY_TRANSACTIONS: Transaction[] = [];
 const BAR_COLORS = ["#2d63c8", "#356cd4", "#4275db", "#4f7ce0", "#5d85e5"];
+const DATE_FILTER_OPTIONS: Array<{ label: string; value: DateFilterType }> = [
+  { label: "All", value: "all" },
+  { label: "Week", value: "week" },
+  { label: "Month", value: "month" },
+  { label: "Custom Date Range", value: "custom" },
+];
 
-const truncateLabel = (value: string) =>
-  value.length > 12 ? `${value.slice(0, 12)}...` : value;
+const wrapLabel = (value: string, maxCharactersPerLine = 14) => {
+  const words = value.split(" ");
+  const lines: string[] = [];
+  let currentLine = "";
+
+  words.forEach((word) => {
+    const nextLine = currentLine ? `${currentLine} ${word}` : word;
+
+    if (nextLine.length <= maxCharactersPerLine || currentLine.length === 0) {
+      currentLine = nextLine;
+      return;
+    }
+
+    lines.push(currentLine);
+    currentLine = word;
+  });
+
+  if (currentLine) {
+    lines.push(currentLine);
+  }
+
+  return lines;
+};
+
+type ProductAxisTickProps = {
+  payload?: {
+    value: string;
+  };
+  x?: number;
+  y?: number;
+};
+
+const ProductAxisTick = ({ payload, x = 0, y = 0 }: ProductAxisTickProps) => {
+  if (!payload?.value) {
+    return null;
+  }
+
+  const lines = wrapLabel(payload.value);
+
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <text fill="#272727" fontSize={10} textAnchor="middle">
+        {lines.map((line, index) => (
+          <tspan key={`${payload.value}-${index}`} x={0} dy={index === 0 ? 16 : 12}>
+            {line}
+          </tspan>
+        ))}
+      </text>
+    </g>
+  );
+};
+
+const toDateInputValue = (value: Date) =>
+  new Date(value.getTime() - value.getTimezoneOffset() * 60000).toISOString().split("T")[0];
+
+const getToday = () => toDateInputValue(new Date());
+
+const formatDateLabel = (value: string) => format(parseISO(value), "MMM d, yyyy");
+
+const getTransactionDateBounds = (transactions: Transaction[]) => {
+  if (transactions.length === 0) {
+    const today = getToday();
+    return { earliestDate: today, latestDate: today };
+  }
+
+  const sortedDates = [...transactions.map((transaction) => transaction.date)].sort((left, right) =>
+    left.localeCompare(right),
+  );
+
+  return {
+    earliestDate: sortedDates[0],
+    latestDate: sortedDates[sortedDates.length - 1],
+  };
+};
+
+const getCustomDateRange = (customFromDate: string, customToDate: string) => {
+  const fallbackDate = customFromDate || customToDate || getToday();
+  const normalizedFromDate = customFromDate || fallbackDate;
+  const normalizedToDate = customToDate || fallbackDate;
+
+  if (normalizedFromDate.localeCompare(normalizedToDate) <= 0) {
+    return {
+      fromDate: normalizedFromDate,
+      toDate: normalizedToDate,
+    };
+  }
+
+  return {
+    fromDate: normalizedToDate,
+    toDate: normalizedFromDate,
+  };
+};
+
+const getDateRange = (filterType: DateFilterType, customFromDate: string, customToDate: string) => {
+  const today = new Date();
+
+  switch (filterType) {
+    case "week": {
+      const fromDate = toDateInputValue(startOfWeek(today));
+      const toDate = toDateInputValue(endOfWeek(today));
+
+      return {
+        fromDate,
+        toDate,
+        label: `This week: ${formatDateLabel(fromDate)} - ${formatDateLabel(toDate)}`,
+      };
+    }
+    case "month": {
+      const fromDate = toDateInputValue(startOfMonth(today));
+      const toDate = toDateInputValue(endOfMonth(today));
+
+      return {
+        fromDate,
+        toDate,
+        label: `This month: ${formatDateLabel(fromDate)} - ${formatDateLabel(toDate)}`,
+      };
+    }
+    case "custom": {
+      const { fromDate, toDate } = getCustomDateRange(customFromDate, customToDate);
+
+      return {
+        fromDate,
+        toDate,
+        label: `Custom range: ${formatDateLabel(fromDate)} - ${formatDateLabel(toDate)}`,
+      };
+    }
+    default: {
+      return {
+        fromDate: "",
+        toDate: "",
+        label: "All dates",
+      };
+    }
+  }
+};
+
+const isTransactionInDateRange = (transactionDate: string, fromDate: string, toDate: string) => {
+  const parsedTransactionDate = parseISO(transactionDate);
+  const parsedFromDate = parseISO(fromDate);
+  const parsedToDate = parseISO(toDate);
+
+  return (
+    (isAfter(parsedTransactionDate, parsedFromDate) || isEqual(parsedTransactionDate, parsedFromDate)) &&
+    (isBefore(parsedTransactionDate, parsedToDate) || isEqual(parsedTransactionDate, parsedToDate))
+  );
+};
 
 const buildTopSellingData = (transactions: Transaction[]): TopSellingDatum[] => {
   const totals = new Map<string, { revenue: number; sales: number }>();
@@ -62,6 +227,10 @@ const buildTopSellingData = (transactions: Transaction[]): TopSellingDatum[] => 
 
 export function TopSellingChart() {
   const { user } = useAuthContext();
+  const [dateFilterType, setDateFilterType] = useState<DateFilterType>("all");
+  const [customFromDate, setCustomFromDate] = useState(getToday);
+  const [customToDate, setCustomToDate] = useState(getToday);
+  const [hasInitializedCustomRange, setHasInitializedCustomRange] = useState(false);
 
   const {
     data: transactionResult,
@@ -90,16 +259,107 @@ export function TopSellingChart() {
     },
   });
 
-  const transactions = transactionResult?.items ?? [];
-  const usingMockTransactions = transactionResult?.source === "mock";
-  const chartData = useMemo(() => buildTopSellingData(transactions), [transactions]);
+  const transactions = transactionResult?.items ?? EMPTY_TRANSACTIONS;
+  const activeDateRange =
+    dateFilterType === "all" ? null : getDateRange(dateFilterType, customFromDate, customToDate);
+  const filteredTransactions = useMemo(() => {
+    if (!activeDateRange) {
+      return transactions;
+    }
+
+    return transactions.filter((transaction) =>
+      isTransactionInDateRange(transaction.date, activeDateRange.fromDate, activeDateRange.toDate),
+    );
+  }, [activeDateRange, transactions]);
+  const chartData = useMemo(() => buildTopSellingData(filteredTransactions), [filteredTransactions]);
+
+  useEffect(() => {
+    if (dateFilterType !== "custom" || hasInitializedCustomRange || transactions.length === 0) {
+      return;
+    }
+
+    const { earliestDate, latestDate } = getTransactionDateBounds(transactions);
+    setCustomFromDate(earliestDate);
+    setCustomToDate(latestDate);
+    setHasInitializedCustomRange(true);
+  }, [dateFilterType, hasInitializedCustomRange, transactions]);
+
+  const handleDateFilterChange = (nextFilter: DateFilterType) => {
+    if (nextFilter === "custom" && !hasInitializedCustomRange && transactions.length > 0) {
+      const { earliestDate, latestDate } = getTransactionDateBounds(transactions);
+      setCustomFromDate(earliestDate);
+      setCustomToDate(latestDate);
+      setHasInitializedCustomRange(true);
+    }
+
+    setDateFilterType(nextFilter);
+  };
+
+  const handleCustomFromDateChange = (value: string) => {
+    setCustomFromDate(value);
+    setHasInitializedCustomRange(true);
+
+    if (value && customToDate && value.localeCompare(customToDate) > 0) {
+      setCustomToDate(value);
+    }
+  };
+
+  const handleCustomToDateChange = (value: string) => {
+    setCustomToDate(value);
+    setHasInitializedCustomRange(true);
+
+    if (value && customFromDate && value.localeCompare(customFromDate) < 0) {
+      setCustomFromDate(value);
+    }
+  };
 
   return (
     <div className="chart-container">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <h3 className="text-lg font-medium text-[#171717]">Top selling Products</h3>
-        {usingMockTransactions ? (
-          <span className="text-xs text-[#666]">Using seeded data</span>
+      <div className="mb-4 space-y-3">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+          <div>
+            <h3 className="text-lg font-medium text-[#171717]">Top selling Products</h3>
+            {activeDateRange ? (
+              <p className="mt-1 text-xs text-[#666]">{activeDateRange.label}</p>
+            ) : null}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+            {DATE_FILTER_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => handleDateFilterChange(option.value)}
+                className={cn(
+                  "rounded-[4px] border px-3 py-2 text-xs font-medium transition-colors",
+                  dateFilterType === option.value
+                    ? "border-[#cf5a5a] bg-[#f6dede] text-[#171717]"
+                    : "border-[#dfd8cf] bg-[#efebe6] text-[#171717] hover:bg-[#e7e1d8]",
+                )}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {dateFilterType === "custom" ? (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:ml-auto xl:max-w-[360px]">
+            <Input
+              aria-label="Custom range start date"
+              type="date"
+              value={customFromDate}
+              onChange={(event) => handleCustomFromDateChange(event.target.value)}
+              className="h-9 rounded-[4px] border-[#dfd8cf] bg-[#efebe6] text-xs text-[#171717] focus-visible:ring-[#cf5a5a] focus-visible:ring-offset-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-70"
+            />
+            <Input
+              aria-label="Custom range end date"
+              type="date"
+              value={customToDate}
+              onChange={(event) => handleCustomToDateChange(event.target.value)}
+              className="h-9 rounded-[4px] border-[#dfd8cf] bg-[#efebe6] text-xs text-[#171717] focus-visible:ring-[#cf5a5a] focus-visible:ring-offset-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-70"
+            />
+          </div>
         ) : null}
       </div>
 
@@ -114,7 +374,9 @@ export function TopSellingChart() {
           </div>
         ) : chartData.length === 0 ? (
           <div className="flex h-full items-center justify-center px-4 text-center text-sm text-white">
-            Top-selling products will appear here after sale transactions are recorded.
+            {activeDateRange
+              ? "No top-selling products were recorded for the selected date range."
+              : "Top-selling products will appear here after sale transactions are recorded."}
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
@@ -122,13 +384,10 @@ export function TopSellingChart() {
               <CartesianGrid stroke="#bcbcbc" strokeDasharray="0" vertical={false} />
               <XAxis
                 dataKey="name"
-                angle={-28}
-                dy={18}
-                height={52}
+                height={72}
                 interval={0}
                 stroke="#272727"
-                tick={{ fill: "#272727", fontSize: 10 }}
-                tickFormatter={truncateLabel}
+                tick={<ProductAxisTick />}
                 tickLine={false}
               />
               <YAxis

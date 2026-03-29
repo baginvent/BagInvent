@@ -1,18 +1,31 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { jsPDF } from "jspdf";
-import { ArrowDownLeft, ArrowUpRight, Download, Loader2, Plus, Calendar } from "lucide-react";
+import {
+  ArrowDownLeft,
+  ArrowUpRight,
+  Calendar,
+  Download,
+  FileSpreadsheet,
+  Loader2,
+  Plus,
+  Upload,
+  X,
+} from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { 
-  startOfWeek, 
-  endOfWeek, 
-  startOfMonth, 
-  endOfMonth, 
-  isAfter, 
-  isBefore, 
-  isEqual, 
+import {
+  endOfMonth,
+  endOfWeek,
+  format,
+  isAfter,
+  isBefore,
+  isEqual,
+  isValid,
+  parse,
   parseISO,
-  format
+  startOfMonth,
+  startOfWeek,
 } from "date-fns";
+import * as XLSX from "xlsx";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -51,6 +64,7 @@ type Transaction = Tables<"transactions">;
 type TransactionType = "incoming" | "sale";
 type ExportFormat = "csv" | "pdf";
 type DateFilterType = "all" | "week" | "month" | "custom";
+const EMPTY_TRANSACTIONS: Transaction[] = [];
 type ProductUpdatePlan = {
   id: string;
   nextQuantity: number;
@@ -73,11 +87,28 @@ type TransactionForm = {
   reference: string;
   type: TransactionType;
 };
+type IncomingImportRow = TransactionForm & {
+  type: "incoming";
+};
+type PendingIncomingImport = {
+  fileName: string;
+  rows: IncomingImportRow[];
+};
+type PersistTransactionArgs = {
+  inventory: Product[];
+  payload: TransactionForm;
+  userId: string;
+  usingMockTransactions: boolean;
+};
 
 const toDateInputValue = (value: Date) =>
   new Date(value.getTime() - value.getTimezoneOffset() * 60000).toISOString().split("T")[0];
 
 const getToday = () => toDateInputValue(new Date());
+
+const normalizeIncomingQuantity = (value: string) => {
+  return value.replace(/[^\d]/g, "").slice(0, 3);
+};
 
 const defaultForm: TransactionForm = {
   amount: "",
@@ -89,6 +120,295 @@ const defaultForm: TransactionForm = {
   quantity: "",
   reference: "",
   type: "incoming" as TransactionType,
+};
+
+const importColumnLabels = [
+  "Product ID",
+  "Product Name",
+  "Category",
+  "Price",
+  "Stock",
+  "Date Received",
+  "Expiry Date",
+] as const;
+
+const importHeaderAliases = {
+  amount: ["price", "amount", "cost", "unit price", "unitprice"],
+  category: ["category", "product category"],
+  date: ["date", "date received", "received date", "incoming date"],
+  expiryDate: ["expiry date", "expiry", "expiration date", "expiration", "best before"],
+  productName: ["product name", "product", "name"],
+  quantity: ["stock", "quantity", "qty", "units"],
+  reference: ["product id", "product code", "productcode", "reference", "sku", "code"],
+} as const;
+
+const supportedSpreadsheetDateFormats = [
+  "yyyy-MM-dd",
+  "M/d/yyyy",
+  "M/d/yy",
+  "MM/dd/yyyy",
+  "MM/dd/yy",
+  "d/M/yyyy",
+  "d/M/yy",
+  "MMM d, yyyy",
+  "MMMM d, yyyy",
+] as const;
+
+const normalizeImportHeader = (value: string) =>
+  value
+    .trim()
+    .toLowerCase()
+    .replaceAll(/[_-]+/g, " ")
+    .replaceAll(/[^\w\s]/g, " ")
+    .replaceAll(/\s+/g, " ")
+    .trim();
+
+const formatDateParts = (year: number, month: number, day: number) =>
+  `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+
+const getRowNumberLabel = (rowIndex: number) => rowIndex + 2;
+
+const getNormalizedSpreadsheetValue = (
+  row: Record<string, unknown>,
+  aliases: readonly string[],
+) => {
+  const normalizedEntries = new Map(
+    Object.entries(row).map(([key, value]) => [normalizeImportHeader(key), value]),
+  );
+
+  for (const alias of aliases) {
+    const matchedValue = normalizedEntries.get(alias);
+
+    if (matchedValue !== undefined) {
+      return matchedValue;
+    }
+  }
+
+  return undefined;
+};
+
+const coerceSpreadsheetText = (value: unknown) => {
+  if (value === null || value === undefined) {
+    return "";
+  }
+
+  return String(value).trim();
+};
+
+const parseSpreadsheetAmount = (value: unknown, rowNumber: number) => {
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || value < 0) {
+      throw new Error(`Row ${rowNumber}: Price must be 0 or higher.`);
+    }
+
+    return value.toString();
+  }
+
+  const normalizedValue = coerceSpreadsheetText(value).replaceAll(",", "").replaceAll(/[^\d.-]/g, "");
+
+  if (!normalizedValue) {
+    throw new Error(`Row ${rowNumber}: Price is required.`);
+  }
+
+  const parsedValue = Number.parseFloat(normalizedValue);
+
+  if (!Number.isFinite(parsedValue) || parsedValue < 0) {
+    throw new Error(`Row ${rowNumber}: Price must be 0 or higher.`);
+  }
+
+  return parsedValue.toString();
+};
+
+const parseSpreadsheetQuantity = (value: unknown, rowNumber: number) => {
+  if (typeof value === "number") {
+    if (!Number.isInteger(value) || value <= 0 || value > 999) {
+      throw new Error(`Row ${rowNumber}: Stock must be a whole number between 1 and 999.`);
+    }
+
+    return value.toString();
+  }
+
+  const normalizedValue = coerceSpreadsheetText(value).replaceAll(",", "");
+
+  if (!normalizedValue) {
+    throw new Error(`Row ${rowNumber}: Stock is required.`);
+  }
+
+  if (!/^\d+$/.test(normalizedValue)) {
+    throw new Error(`Row ${rowNumber}: Stock must be a whole number between 1 and 999.`);
+  }
+
+  const parsedValue = Number.parseInt(normalizedValue, 10);
+
+  if (parsedValue <= 0 || parsedValue > 999) {
+    throw new Error(`Row ${rowNumber}: Stock must be a whole number between 1 and 999.`);
+  }
+
+  return parsedValue.toString();
+};
+
+const parseSpreadsheetDate = ({
+  allowBlank = false,
+  label,
+  rowNumber,
+  value,
+}: {
+  allowBlank?: boolean;
+  label: string;
+  rowNumber: number;
+  value: unknown;
+}) => {
+  if (value === null || value === undefined || value === "") {
+    if (allowBlank) {
+      return "";
+    }
+
+    throw new Error(`Row ${rowNumber}: ${label} is required.`);
+  }
+
+  if (value instanceof Date) {
+    if (!isValid(value)) {
+      throw new Error(`Row ${rowNumber}: ${label} must be a valid date.`);
+    }
+
+    return format(value, "yyyy-MM-dd");
+  }
+
+  if (typeof value === "number") {
+    const parsedDate = XLSX.SSF.parse_date_code(value);
+
+    if (!parsedDate) {
+      throw new Error(`Row ${rowNumber}: ${label} must be a valid date.`);
+    }
+
+    return formatDateParts(parsedDate.y, parsedDate.m, parsedDate.d);
+  }
+
+  const normalizedValue = coerceSpreadsheetText(value);
+
+  if (!normalizedValue) {
+    if (allowBlank) {
+      return "";
+    }
+
+    throw new Error(`Row ${rowNumber}: ${label} is required.`);
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(normalizedValue)) {
+    const isoDate = parseISO(normalizedValue);
+
+    if (!isValid(isoDate)) {
+      throw new Error(`Row ${rowNumber}: ${label} must be a valid date.`);
+    }
+
+    return normalizedValue;
+  }
+
+  if (/^\d+(\.\d+)?$/.test(normalizedValue)) {
+    const parsedDate = XLSX.SSF.parse_date_code(Number.parseFloat(normalizedValue));
+
+    if (parsedDate) {
+      return formatDateParts(parsedDate.y, parsedDate.m, parsedDate.d);
+    }
+  }
+
+  for (const dateFormat of supportedSpreadsheetDateFormats) {
+    const parsedValue = parse(normalizedValue, dateFormat, new Date());
+
+    if (isValid(parsedValue)) {
+      return format(parsedValue, "yyyy-MM-dd");
+    }
+  }
+
+  const nativeDate = new Date(normalizedValue);
+
+  if (isValid(nativeDate)) {
+    return format(nativeDate, "yyyy-MM-dd");
+  }
+
+  throw new Error(`Row ${rowNumber}: ${label} must be a valid date.`);
+};
+
+const mapSpreadsheetRowToIncomingForm = (
+  row: Record<string, unknown>,
+  rowIndex: number,
+): IncomingImportRow => {
+  const rowNumber = getRowNumberLabel(rowIndex);
+  const productName = coerceSpreadsheetText(
+    getNormalizedSpreadsheetValue(row, importHeaderAliases.productName),
+  );
+  const category = coerceSpreadsheetText(
+    getNormalizedSpreadsheetValue(row, importHeaderAliases.category),
+  );
+  const reference = coerceSpreadsheetText(
+    getNormalizedSpreadsheetValue(row, importHeaderAliases.reference),
+  );
+
+  if (!productName) {
+    throw new Error(`Row ${rowNumber}: Product Name is required.`);
+  }
+
+  if (!category) {
+    throw new Error(`Row ${rowNumber}: Category is required.`);
+  }
+
+  return {
+    amount: parseSpreadsheetAmount(
+      getNormalizedSpreadsheetValue(row, importHeaderAliases.amount),
+      rowNumber,
+    ),
+    category,
+    date: parseSpreadsheetDate({
+      label: "Date Received",
+      rowNumber,
+      value: getNormalizedSpreadsheetValue(row, importHeaderAliases.date),
+    }),
+    expiryDate: parseSpreadsheetDate({
+      allowBlank: true,
+      label: "Expiry Date",
+      rowNumber,
+      value: getNormalizedSpreadsheetValue(row, importHeaderAliases.expiryDate),
+    }),
+    productId: "",
+    productName,
+    quantity: parseSpreadsheetQuantity(
+      getNormalizedSpreadsheetValue(row, importHeaderAliases.quantity),
+      rowNumber,
+    ),
+    reference,
+    type: "incoming",
+  };
+};
+
+const parseIncomingImportFile = async (file: File): Promise<PendingIncomingImport> => {
+  const workbook = XLSX.read(await file.arrayBuffer(), {
+    cellDates: true,
+    type: "array",
+  });
+  const [sheetName] = workbook.SheetNames;
+
+  if (!sheetName) {
+    throw new Error("The selected workbook does not contain any sheets.");
+  }
+
+  const sheet = workbook.Sheets[sheetName];
+  const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+    blankrows: false,
+    defval: "",
+    raw: true,
+  });
+  const filteredRows = rawRows.filter((row) =>
+    Object.values(row).some((value) => coerceSpreadsheetText(value) !== ""),
+  );
+
+  if (filteredRows.length === 0) {
+    throw new Error("The selected sheet is empty.");
+  }
+
+  return {
+    fileName: file.name,
+    rows: filteredRows.map((row, rowIndex) => mapSpreadsheetRowToIncomingForm(row, rowIndex)),
+  };
 };
 
 const getDateRange = (filterType: DateFilterType, customFromDate?: string, customToDate?: string) => {
@@ -361,6 +681,254 @@ const applyProductUpdatePlan = async (updates: ProductUpdatePlan[]) => {
   }
 };
 
+const applyInventoryUpdatesToSnapshot = (inventory: Product[], updates: ProductUpdatePlan[]) => {
+  if (updates.length === 0) {
+    return inventory;
+  }
+
+  const updatesById = new Map(updates.map((update) => [update.id, update]));
+  const updatedAt = new Date().toISOString();
+
+  return inventory.map((product) => {
+    const nextUpdate = updatesById.get(product.id);
+
+    if (!nextUpdate) {
+      return product;
+    }
+
+    return {
+      ...product,
+      quantity: nextUpdate.nextQuantity,
+      status: nextUpdate.nextStatus,
+      updated_at: updatedAt,
+    };
+  });
+};
+
+const saveTransactionRecord = async ({
+  inventory,
+  payload,
+  userId,
+  usingMockTransactions,
+}: PersistTransactionArgs) => {
+  const quantity = Number.parseInt(payload.quantity, 10);
+  const amount = Number.parseFloat(payload.amount);
+
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    throw new Error("Quantity must be greater than 0");
+  }
+
+  if (!Number.isFinite(amount) || amount < 0) {
+    throw new Error("Amount must be 0 or higher");
+  }
+
+  if (payload.type === "incoming") {
+    if (quantity > 999) {
+      throw new Error("Stock must be 999 or lower.");
+    }
+
+    const productName = payload.productName.trim();
+    const category = payload.category.trim();
+    const expiryDate = payload.expiryDate;
+
+    if (!productName) {
+      throw new Error("Product name is required");
+    }
+
+    if (!category) {
+      throw new Error("Category is required");
+    }
+
+    const reference =
+      payload.reference.trim() ||
+      `INCOMING-${payload.date.replaceAll("-", "")}-${productName.slice(0, 3).toUpperCase()}`;
+    const matchingBatch = getIncomingBatchMatch({
+      category,
+      expiryDate,
+      productName,
+      products: inventory,
+    });
+    const buildTransactionInput = (product: Product) => ({
+      amount,
+      date: payload.date,
+      productId: product.id,
+      productName,
+      quantity,
+      reference,
+      type: payload.type,
+      userId,
+    });
+
+    if (matchingBatch) {
+      const productUpdates = buildProductUpdatePlan({
+        products: inventory,
+        quantity,
+        selectedProduct: matchingBatch,
+        type: payload.type,
+      });
+
+      if (usingMockTransactions) {
+        await applyProductUpdatePlan(productUpdates);
+        addMockTransaction(buildTransactionInput(matchingBatch));
+        return applyInventoryUpdatesToSnapshot(inventory, productUpdates);
+      }
+
+      const { data: createdTransaction, error: insertError } = await supabase
+        .from("transactions")
+        .insert({
+          amount,
+          date: payload.date,
+          product_id: matchingBatch.id,
+          product_name: productName,
+          quantity,
+          reference,
+          type: payload.type,
+          user_id: userId,
+        })
+        .select("id")
+        .single();
+
+      if (insertError) {
+        if (isMissingTransactionsTableError(insertError)) {
+          await applyProductUpdatePlan(productUpdates);
+          addMockTransaction(buildTransactionInput(matchingBatch));
+          return applyInventoryUpdatesToSnapshot(inventory, productUpdates);
+        }
+
+        throw insertError;
+      }
+
+      try {
+        await applyProductUpdatePlan(productUpdates);
+      } catch (updateProductError) {
+        await supabase.from("transactions").delete().eq("id", createdTransaction.id);
+        throw updateProductError;
+      }
+
+      return applyInventoryUpdatesToSnapshot(inventory, productUpdates);
+    }
+
+    const { data: createdProduct, error: createProductError } = await supabase
+      .from("products")
+      .insert({
+        category,
+        expiry_date: expiryDate || null,
+        name: productName,
+        quantity,
+        status: getStatusFromQuantity(quantity),
+        user_id: userId,
+      })
+      .select("*")
+      .single();
+
+    if (createProductError) {
+      throw createProductError;
+    }
+
+    if (usingMockTransactions) {
+      addMockTransaction(buildTransactionInput(createdProduct));
+      return [...inventory, createdProduct];
+    }
+
+    const { error: insertTransactionError } = await supabase.from("transactions").insert({
+      amount,
+      date: payload.date,
+      product_id: createdProduct.id,
+      product_name: productName,
+      quantity,
+      reference,
+      type: payload.type,
+      user_id: userId,
+    });
+
+    if (insertTransactionError) {
+      if (isMissingTransactionsTableError(insertTransactionError)) {
+        addMockTransaction(buildTransactionInput(createdProduct));
+        return [...inventory, createdProduct];
+      }
+
+      await supabase.from("products").delete().eq("id", createdProduct.id);
+      throw insertTransactionError;
+    }
+
+    return [...inventory, createdProduct];
+  }
+
+  if (!payload.productId) {
+    throw new Error("Please select a product to sell.");
+  }
+
+  const selectedProduct = getResolvedProductForTransaction({
+    productId: payload.productId,
+    products: inventory,
+    type: payload.type,
+  });
+
+  if (!selectedProduct) {
+    throw new Error("Selected product could not be found.");
+  }
+
+  const reference =
+    payload.reference.trim() ||
+    `SALE-${payload.date.replaceAll("-", "")}-${selectedProduct.name.slice(0, 3).toUpperCase()}`;
+  const productUpdates = buildProductUpdatePlan({
+    products: inventory,
+    quantity,
+    selectedProduct,
+    type: payload.type,
+  });
+  const transactionInput = {
+    amount,
+    date: payload.date,
+    productId: selectedProduct.id,
+    productName: selectedProduct.name,
+    quantity,
+    reference,
+    type: payload.type,
+    userId,
+  };
+
+  if (usingMockTransactions) {
+    await applyProductUpdatePlan(productUpdates);
+    addMockTransaction(transactionInput);
+    return applyInventoryUpdatesToSnapshot(inventory, productUpdates);
+  }
+
+  const { data: createdTransaction, error: insertError } = await supabase
+    .from("transactions")
+    .insert({
+      amount,
+      date: payload.date,
+      product_id: selectedProduct.id,
+      product_name: selectedProduct.name,
+      quantity,
+      reference,
+      type: payload.type,
+      user_id: userId,
+    })
+    .select("id")
+    .single();
+
+  if (insertError) {
+    if (isMissingTransactionsTableError(insertError)) {
+      await applyProductUpdatePlan(productUpdates);
+      addMockTransaction(transactionInput);
+      return applyInventoryUpdatesToSnapshot(inventory, productUpdates);
+    }
+
+    throw insertError;
+  }
+
+  try {
+    await applyProductUpdatePlan(productUpdates);
+  } catch (updateProductError) {
+    await supabase.from("transactions").delete().eq("id", createdTransaction.id);
+    throw updateProductError;
+  }
+
+  return applyInventoryUpdatesToSnapshot(inventory, productUpdates);
+};
+
 export default function Transactions() {
   const [form, setForm] = useState(defaultForm);
   const [exportFormat, setExportFormat] = useState<ExportFormat>("csv");
@@ -369,9 +937,64 @@ export default function Transactions() {
   const [customFromDate, setCustomFromDate] = useState(getToday());
   const [customToDate, setCustomToDate] = useState(getToday());
   const [isSeeding, setIsSeeding] = useState(false);
+  const [isParsingImport, setIsParsingImport] = useState(false);
+  const [pendingIncomingImport, setPendingIncomingImport] = useState<PendingIncomingImport | null>(
+    null,
+  );
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const { user } = useAuthContext();
   const queryClient = useQueryClient();
+
+  const clearPendingIncomingImport = () => {
+    setPendingIncomingImport(null);
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const refreshWorkspaceData = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["products", user?.id] }),
+      queryClient.invalidateQueries({ queryKey: ["transactions", user?.id] }),
+    ]);
+  };
+
+  const handleTypeChange = (nextType: TransactionType) => {
+    if (nextType === "sale") {
+      clearPendingIncomingImport();
+    }
+
+    setForm({
+      ...defaultForm,
+      amount: form.amount,
+      type: nextType,
+    });
+  };
+
+  const handleImportFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    setIsParsingImport(true);
+
+    try {
+      const parsedImport = await parseIncomingImportFile(file);
+      setPendingIncomingImport(parsedImport);
+      toast.success(
+        `${parsedImport.rows.length} product row${parsedImport.rows.length === 1 ? "" : "s"} ready to import.`,
+      );
+    } catch (error) {
+      clearPendingIncomingImport();
+      toast.error(error instanceof Error ? error.message : "Could not read the selected file.");
+    } finally {
+      setIsParsingImport(false);
+    }
+  };
 
   useEffect(() => {
     if (!user) {
@@ -469,7 +1092,7 @@ export default function Transactions() {
     },
   });
 
-  const transactions = transactionResult?.items ?? [];
+  const transactions = transactionResult?.items ?? EMPTY_TRANSACTIONS;
   const usingMockTransactions = transactionResult?.source === "mock";
   const productOptions = useMemo(() => buildSaleProductOptions(products), [products]);
   const categoryOptions = useMemo(
@@ -715,226 +1338,70 @@ export default function Transactions() {
 
   const addTransactionMutation = useMutation({
     mutationFn: async (payload: TransactionForm) => {
-      const quantity = Number.parseInt(payload.quantity, 10);
-      const amount = Number.parseFloat(payload.amount);
-
-      if (!Number.isFinite(quantity) || quantity <= 0) {
-        throw new Error("Quantity must be greater than 0");
+      if (!user) {
+        throw new Error("You need to sign in before saving transactions.");
       }
 
-      if (!Number.isFinite(amount) || amount < 0) {
-        throw new Error("Amount must be 0 or higher");
-      }
-
-      if (payload.type === "incoming") {
-        const productName = payload.productName.trim();
-        const category = payload.category.trim();
-        const expiryDate = payload.expiryDate;
-
-        if (!productName) {
-          throw new Error("Product name is required");
-        }
-
-        if (!category) {
-          throw new Error("Category is required");
-        }
-
-        const reference =
-          payload.reference.trim() ||
-          `INCOMING-${payload.date.replaceAll("-", "")}-${productName.slice(0, 3).toUpperCase()}`;
-        const matchingBatch = getIncomingBatchMatch({
-          category,
-          expiryDate,
-          productName,
-          products,
-        });
-
-        const buildTransactionInput = (product: Product) => ({
-          amount,
-          date: payload.date,
-          productId: product.id,
-          productName,
-          quantity,
-          reference,
-          type: payload.type,
-          userId: user!.id,
-        });
-
-        if (matchingBatch) {
-          const productUpdates = buildProductUpdatePlan({
-            products,
-            quantity,
-            selectedProduct: matchingBatch,
-            type: payload.type,
-          });
-
-          if (usingMockTransactions) {
-            await applyProductUpdatePlan(productUpdates);
-            addMockTransaction(buildTransactionInput(matchingBatch));
-            return;
-          }
-          const { data: createdTransaction, error: insertError } = await supabase
-            .from("transactions")
-            .insert({
-              amount,
-              date: payload.date,
-              product_id: matchingBatch.id,
-              product_name: productName,
-              quantity,
-              reference,
-              type: payload.type,
-              user_id: user!.id,
-            })
-            .select("id")
-            .single();
-
-          if (insertError) {
-            if (isMissingTransactionsTableError(insertError)) {
-              await applyProductUpdatePlan(productUpdates);
-              addMockTransaction(buildTransactionInput(matchingBatch));
-              return;
-            }
-
-            throw insertError;
-          }
-
-          try {
-            await applyProductUpdatePlan(productUpdates);
-          } catch (updateProductError) {
-            await supabase.from("transactions").delete().eq("id", createdTransaction.id);
-            throw updateProductError;
-          }
-
-          return;
-        }
-
-        const { data: createdProduct, error: createProductError } = await supabase
-          .from("products")
-          .insert({
-            category,
-            expiry_date: expiryDate || null,
-            name: productName,
-            quantity,
-            status: getStatusFromQuantity(quantity),
-            user_id: user!.id,
-          })
-          .select("*")
-          .single();
-
-        if (createProductError) {
-          throw createProductError;
-        }
-
-        if (usingMockTransactions) {
-          addMockTransaction(buildTransactionInput(createdProduct));
-          return;
-        }
-
-        const { error: insertTransactionError } = await supabase.from("transactions").insert({
-          amount,
-          date: payload.date,
-          product_id: createdProduct.id,
-          product_name: productName,
-          quantity,
-          reference,
-          type: payload.type,
-          user_id: user!.id,
-        });
-
-        if (insertTransactionError) {
-          if (isMissingTransactionsTableError(insertTransactionError)) {
-            addMockTransaction(buildTransactionInput(createdProduct));
-            return;
-          }
-
-          await supabase.from("products").delete().eq("id", createdProduct.id);
-          throw insertTransactionError;
-        }
-
-        return;
-      }
-
-      if (!payload.productId) {
-        throw new Error("Please select a product to sell.");
-      }
-
-      const selectedProduct = getResolvedProductForTransaction({
-        productId: payload.productId,
-        products,
-        type: payload.type,
+      await saveTransactionRecord({
+        inventory: products,
+        payload,
+        userId: user.id,
+        usingMockTransactions,
       });
-
-      if (!selectedProduct) {
-        throw new Error("Selected product could not be found.");
-      }
-
-      const reference =
-        payload.reference.trim() ||
-        `SALE-${payload.date.replaceAll("-", "")}-${selectedProduct.name.slice(0, 3).toUpperCase()}`;
-      const productUpdates = buildProductUpdatePlan({
-        products,
-        quantity,
-        selectedProduct,
-        type: payload.type,
-      });
-      const transactionInput = {
-        amount,
-        date: payload.date,
-        productId: selectedProduct.id,
-        productName: selectedProduct.name,
-        quantity,
-        reference,
-        type: payload.type,
-        userId: user!.id,
-      };
-
-      if (usingMockTransactions) {
-        await applyProductUpdatePlan(productUpdates);
-        addMockTransaction(transactionInput);
-        return;
-      }
-
-      const { data: createdTransaction, error: insertError } = await supabase
-        .from("transactions")
-        .insert({
-          amount,
-          date: payload.date,
-          product_id: selectedProduct.id,
-          product_name: selectedProduct.name,
-          quantity,
-          reference,
-          type: payload.type,
-          user_id: user!.id,
-        })
-        .select("id")
-        .single();
-
-      if (insertError) {
-        if (isMissingTransactionsTableError(insertError)) {
-          await applyProductUpdatePlan(productUpdates);
-          addMockTransaction(transactionInput);
-          return;
-        }
-
-        throw insertError;
-      }
-
-      try {
-        await applyProductUpdatePlan(productUpdates);
-      } catch (updateProductError) {
-        await supabase.from("transactions").delete().eq("id", createdTransaction.id);
-        throw updateProductError;
-      }
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Failed to record transaction.");
     },
-    onSuccess: () => {
+    onSuccess: async () => {
       toast.success(form.type === "incoming" ? "Product added to inventory." : "Sale recorded.");
       setForm(defaultForm);
       setTypeFilter("all");
-      queryClient.invalidateQueries({ queryKey: ["products", user?.id] });
-      queryClient.invalidateQueries({ queryKey: ["transactions", user?.id] });
+      await refreshWorkspaceData();
+    },
+  });
+
+  const importIncomingMutation = useMutation({
+    mutationFn: async (rows: IncomingImportRow[]) => {
+      if (!user) {
+        throw new Error("You need to sign in before importing products.");
+      }
+
+      let inventorySnapshot = products;
+      let importedCount = 0;
+
+      for (const row of rows) {
+        try {
+          inventorySnapshot = await saveTransactionRecord({
+            inventory: inventorySnapshot,
+            payload: row,
+            userId: user.id,
+            usingMockTransactions,
+          });
+          importedCount += 1;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Import failed.";
+
+          if (importedCount === 0) {
+            throw error;
+          }
+
+          throw new Error(
+            `${message} Imported ${importedCount} row${importedCount === 1 ? "" : "s"} before the import stopped.`,
+          );
+        }
+      }
+
+      return importedCount;
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to import products.");
+    },
+    onSuccess: async (importedCount) => {
+      clearPendingIncomingImport();
+      toast.success(
+        `${importedCount} product row${importedCount === 1 ? "" : "s"} imported to inventory.`,
+      );
+      await refreshWorkspaceData();
     },
   });
 
@@ -945,13 +1412,17 @@ export default function Transactions() {
 
   const hasLoadError = Boolean(productsError || transactionsError);
   const isLoading = isProductsLoading || isTransactionsLoading || isSeeding;
-  const latestTransaction = transactions[0];
   const panelClassName =
     "rounded-[4px] bg-[#fbfaf7] p-6 text-[#171717] shadow-[0_12px_32px_rgba(34,28,24,0.08)] ring-1 ring-[#ddd6cb]";
   const fieldClassName =
     "h-11 rounded-[4px] border-0 bg-[#d8d8d8] text-[#171717] placeholder:text-[#787878] focus-visible:ring-1 focus-visible:ring-[#cf5a5a]";
   const pageTitle = form.type === "incoming" ? "Add Product" : "Record Sale";
   const pageDescription = "";
+  const importPreviewRows = pendingIncomingImport?.rows.slice(0, 3) ?? [];
+  const remainingImportRowsCount = Math.max(
+    0,
+    (pendingIncomingImport?.rows.length ?? 0) - importPreviewRows.length,
+  );
 
   return (
     <DashboardLayout pageLabel="Transactions">
@@ -979,13 +1450,7 @@ export default function Transactions() {
               <div className="grid grid-cols-2 gap-2 rounded-[4px] bg-[#ece7e1] p-1">
                 <button
                   type="button"
-                  onClick={() =>
-                    setForm({
-                      ...defaultForm,
-                      amount: form.amount,
-                      type: "incoming",
-                    })
-                  }
+                  onClick={() => handleTypeChange("incoming")}
                   className={
                     form.type === "incoming"
                       ? "rounded-[4px] bg-[#cf5a5a] px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-white"
@@ -996,13 +1461,7 @@ export default function Transactions() {
                 </button>
                 <button
                   type="button"
-                  onClick={() =>
-                    setForm({
-                      ...defaultForm,
-                      amount: form.amount,
-                      type: "sale",
-                    })
-                  }
+                  onClick={() => handleTypeChange("sale")}
                   className={
                     form.type === "sale"
                       ? "rounded-[4px] bg-[#cf5a5a] px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-white"
@@ -1013,6 +1472,138 @@ export default function Transactions() {
                 </button>
               </div>
             </div>
+
+            {form.type === "incoming" ? (
+              <div className="mt-6 rounded-[4px] border border-[#ddd6cb] bg-[#f5f1eb] p-4">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-[#171717]">
+                      <FileSpreadsheet className="h-5 w-5 text-[#2d63c8]" />
+                      <h2 className="text-lg font-medium">Import from Excel</h2>
+                    </div>
+                    <p className="max-w-[38rem] text-sm leading-relaxed text-[#5f5a56]">
+                      Upload the first sheet from an <code>.xlsx</code>, <code>.xls</code>, or
+                      <code>.csv</code> file to add new products or top up matching batches.
+                    </p>
+                    <p className="text-xs text-[#7a726b]">
+                      Matching rows are grouped by product name, category, and expiry date.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <input
+                      ref={fileInputRef}
+                      accept=".xlsx,.xls,.csv"
+                      className="hidden"
+                      onChange={handleImportFileChange}
+                      type="file"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isParsingImport || importIncomingMutation.isPending || hasLoadError}
+                      className="h-10 rounded-[4px] border-[#d9d2c9] bg-[#fbfaf7] text-[#171717] hover:bg-[#efebe6]"
+                    >
+                      {isParsingImport ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Reading Sheet
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="mr-2 h-4 w-4" />
+                          Choose File
+                        </>
+                      )}
+                    </Button>
+
+                    {pendingIncomingImport ? (
+                      <Button
+                        type="button"
+                        onClick={() => importIncomingMutation.mutate(pendingIncomingImport.rows)}
+                        disabled={importIncomingMutation.isPending || hasLoadError}
+                        className="h-10 rounded-[4px] bg-[#cf5a5a] px-5 text-white hover:bg-[#bb4f4f]"
+                      >
+                        {importIncomingMutation.isPending ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Importing
+                          </>
+                        ) : (
+                          <>
+                            <Plus className="mr-2 h-4 w-4" />
+                            Import Rows
+                          </>
+                        )}
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {importColumnLabels.map((columnLabel) => (
+                    <span
+                      key={columnLabel}
+                      className="rounded-full bg-[#ece7e1] px-3 py-1 text-xs font-medium text-[#5f5a56]"
+                    >
+                      {columnLabel}
+                    </span>
+                  ))}
+                </div>
+
+                {pendingIncomingImport ? (
+                  <div className="mt-4 rounded-[4px] bg-[#fbfaf7] p-4 ring-1 ring-[#ddd6cb]">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                      <div className="space-y-1">
+                        <p className="text-sm font-semibold text-[#171717]">
+                          {pendingIncomingImport.fileName}
+                        </p>
+                        <p className="text-xs text-[#5f5a56]">
+                          {pendingIncomingImport.rows.length} row
+                          {pendingIncomingImport.rows.length === 1 ? "" : "s"} ready for import.
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={clearPendingIncomingImport}
+                        className="inline-flex items-center gap-2 text-sm font-medium text-[#7a726b] transition-colors hover:text-[#171717]"
+                      >
+                        <X className="h-4 w-4" />
+                        Clear file
+                      </button>
+                    </div>
+
+                    <div className="mt-4 space-y-2">
+                      {importPreviewRows.map((row, index) => (
+                        <div
+                          key={`${row.productName}-${row.category}-${row.date}-${index}`}
+                          className="flex flex-col gap-1 rounded-[4px] bg-[#f5f1eb] px-3 py-2 text-sm text-[#171717] md:flex-row md:items-center md:justify-between"
+                        >
+                          <div>
+                            <p className="font-medium">{row.productName}</p>
+                            <p className="text-xs text-[#6c6661]">
+                              {row.category} • {row.date} • {row.expiryDate || "No expiry"}
+                            </p>
+                          </div>
+                          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#5f5a56]">
+                            {row.quantity} units • P {Number.parseFloat(row.amount).toFixed(2)}
+                          </p>
+                        </div>
+                      ))}
+
+                      {remainingImportRowsCount > 0 ? (
+                        <p className="text-xs text-[#7a726b]">
+                          +{remainingImportRowsCount} more row
+                          {remainingImportRowsCount === 1 ? "" : "s"} will be imported.
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
 
             <form onSubmit={handleSubmit} className="mt-6 grid gap-4 md:grid-cols-2">
               {form.type === "sale" ? (
@@ -1085,7 +1676,7 @@ export default function Transactions() {
                     />
                   </div>
 
-                  <div className="space-y-2">
+                  <div className="space-y-2 md:col-span-2">
                     <Label htmlFor="date" className="text-sm font-medium text-[#171717]">
                       Transaction Date
                     </Label>
@@ -1099,19 +1690,6 @@ export default function Transactions() {
                         "[&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-70",
                       )}
                       required
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="saleReference" className="text-sm font-medium text-[#171717]">
-                      Reference
-                    </Label>
-                    <Input
-                      id="saleReference"
-                      value={form.reference}
-                      onChange={(event) => setForm({ ...form, reference: event.target.value })}
-                      className={fieldClassName}
-                      placeholder="Optional"
                     />
                   </div>
                 </>
@@ -1199,10 +1777,14 @@ export default function Transactions() {
                     </Label>
                     <Input
                       id="quantity"
-                      type="number"
-                      min={1}
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={3}
+                      pattern="[0-9]*"
                       value={form.quantity}
-                      onChange={(event) => setForm({ ...form, quantity: event.target.value })}
+                      onChange={(event) =>
+                        setForm({ ...form, quantity: normalizeIncomingQuantity(event.target.value) })
+                      }
                       className={fieldClassName}
                       required
                     />
@@ -1247,7 +1829,11 @@ export default function Transactions() {
                 <Button
                   type="submit"
                   className="h-10 rounded-[4px] bg-[#d8d8d8] px-8 text-[#171717] hover:bg-[#cccccc]"
-                  disabled={addTransactionMutation.isPending || hasLoadError}
+                  disabled={
+                    addTransactionMutation.isPending ||
+                    importIncomingMutation.isPending ||
+                    hasLoadError
+                  }
                 >
                   {addTransactionMutation.isPending ? (
                     <>
@@ -1393,53 +1979,6 @@ export default function Transactions() {
               >
                 <Download className="mr-2 h-4 w-4" />
                 {exportFormat === "csv" ? "Export CSV" : "Export PDF"}
-              </Button>
-            </section>
-
-            <section className={panelClassName}>
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h2 className="text-[1.65rem] font-medium leading-none text-[#171717]">
-                    Scanned IoT
-                  </h2>
-                  <p className="mt-2 text-sm text-[#5f5a56]">
-                    Live handoff area for device captures before they are confirmed into inventory.
-                  </p>
-                </div>
-                <span className="rounded-full bg-[#d7f6e3] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#2f7b54]">
-                  Connected
-                </span>
-              </div>
-
-              <div className="mt-5 min-h-[184px] rounded-[4px] bg-[#d8d8d8] p-4">
-                <div className="grid gap-4 text-sm text-[#171717]">
-                  <div className="flex items-center justify-between gap-4 border-b border-black/10 pb-3">
-                    <span className="text-[#5f5a56]">Latest activity</span>
-                    <span className="text-right font-medium">
-                      {latestTransaction ? latestTransaction.product_name : "Awaiting device scan"}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between gap-4 border-b border-black/10 pb-3">
-                    <span className="text-[#5f5a56]">Last captured</span>
-                    <span className="text-right font-medium">
-                      {latestTransaction
-                        ? new Date(latestTransaction.created_at).toLocaleString()
-                        : "No scan detected yet"}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between gap-4">
-                    <span className="text-[#5f5a56]">Tracked batches</span>
-                    <span className="text-right font-medium">{products.length} batches ready</span>
-                  </div>
-                </div>
-              </div>
-
-              <Button
-                className="mt-4 h-11 w-full rounded-[4px] bg-[#d8d8d8] text-[#171717] hover:bg-[#cccccc]"
-                type="button"
-                onClick={() => setForm(defaultForm)}
-              >
-                Import Products
               </Button>
             </section>
           </div>

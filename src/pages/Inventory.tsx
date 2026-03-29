@@ -54,6 +54,14 @@ import { buildMockTransactions, formatCurrency } from "@/lib/forecastInsights";
 
 type Product = Tables<"products">;
 type Transaction = Tables<"transactions">;
+type InventoryStatusFilter = "all" | "critical" | "in-stock" | "low-stock";
+type ProductQuantityUpdatePlan = {
+  id: string;
+  nextQuantity: number;
+  nextStatus: string;
+  previousQuantity: number;
+  previousStatus: string;
+};
 type ProductGroup = {
   batchCount: number;
   category: string;
@@ -64,6 +72,7 @@ type ProductGroup = {
   totalQuantity: number;
 };
 
+const EMPTY_TRANSACTIONS: Transaction[] = [];
 const PRODUCT_SWATCHES = [
   "#2d63c8",
   "#d05454",
@@ -71,6 +80,12 @@ const PRODUCT_SWATCHES = [
   "#8b66cf",
   "#d28c2c",
   "#3b8787",
+];
+const STATUS_FILTER_OPTIONS: Array<{ label: string; value: InventoryStatusFilter }> = [
+  { label: "All Status", value: "all" },
+  { label: "In Stock", value: "in-stock" },
+  { label: "Low Stock", value: "low-stock" },
+  { label: "Critical Stock", value: "critical" },
 ];
 
 const getProductGroupKey = (product: Pick<Product, "category" | "name">) =>
@@ -110,6 +125,11 @@ const getDaysUntil = (expiryDate: string | null) => {
   return Math.round((expiry.getTime() - today.getTime()) / 86400000);
 };
 
+const isExpiringSoon = (expiryDate: string | null) => {
+  const daysUntilExpiry = getDaysUntil(expiryDate);
+  return Number.isFinite(daysUntilExpiry) && daysUntilExpiry >= 0 && daysUntilExpiry <= 30;
+};
+
 const getProductColor = (name: string) =>
   PRODUCT_SWATCHES[
     [...name].reduce((sum, character) => sum + character.charCodeAt(0), 0) %
@@ -135,10 +155,69 @@ const buildUnitPriceByName = (transactions: Transaction[]) => {
   return values;
 };
 
+const buildGroupQuantityUpdatePlan = (
+  group: ProductGroup,
+  nextTotalQuantity: number,
+): ProductQuantityUpdatePlan[] => {
+  const targetQuantity = Math.max(0, Math.floor(nextTotalQuantity));
+
+  if (targetQuantity === group.totalQuantity) {
+    return [];
+  }
+
+  const sortedProducts = [...group.products].sort(sortProductsByBatch);
+
+  if (targetQuantity > group.totalQuantity) {
+    const targetBatch = sortedProducts[sortedProducts.length - 1];
+
+    if (!targetBatch) {
+      return [];
+    }
+
+    const nextQuantityForBatch = targetBatch.quantity + (targetQuantity - group.totalQuantity);
+
+    return [
+      {
+        id: targetBatch.id,
+        nextQuantity: nextQuantityForBatch,
+        nextStatus: getStatusFromQuantity(nextQuantityForBatch),
+        previousQuantity: targetBatch.quantity,
+        previousStatus: targetBatch.status,
+      },
+    ];
+  }
+
+  let remainingQuantityToDeduct = group.totalQuantity - targetQuantity;
+  const updates: ProductQuantityUpdatePlan[] = [];
+
+  for (const product of sortedProducts) {
+    if (remainingQuantityToDeduct === 0) {
+      break;
+    }
+
+    const deductedQuantity = Math.min(product.quantity, remainingQuantityToDeduct);
+    const nextQuantityForBatch = product.quantity - deductedQuantity;
+
+    updates.push({
+      id: product.id,
+      nextQuantity: nextQuantityForBatch,
+      nextStatus: getStatusFromQuantity(nextQuantityForBatch),
+      previousQuantity: product.quantity,
+      previousStatus: product.status,
+    });
+
+    remainingQuantityToDeduct -= deductedQuantity;
+  }
+
+  return updates;
+};
+
 export default function Inventory() {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All");
+  const [statusFilter, setStatusFilter] = useState<InventoryStatusFilter>("all");
+  const [quantityDrafts, setQuantityDrafts] = useState<Record<string, string>>({});
   const [isSeeding, setIsSeeding] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
   const [productPendingDelete, setProductPendingDelete] = useState<Product | null>(null);
@@ -232,7 +311,7 @@ export default function Inventory() {
     },
   });
 
-  const transactions = transactionResult?.items ?? [];
+  const transactions = transactionResult?.items ?? EMPTY_TRANSACTIONS;
 
   const categoryOptions = useMemo(() => {
     const options = new Set<string>();
@@ -313,10 +392,10 @@ export default function Inventory() {
   }, [activeProducts]);
 
   useEffect(() => {
-    const visibleGroupKeys = new Set(groupedProducts.map((group) => group.key));
-
-    setExpandedGroups((currentGroups) =>
-      currentGroups.filter((groupKey) => visibleGroupKeys.has(groupKey)),
+    setQuantityDrafts(
+      Object.fromEntries(
+        groupedProducts.map((group) => [group.key, String(group.totalQuantity)]),
+      ),
     );
   }, [groupedProducts]);
 
@@ -334,8 +413,6 @@ export default function Inventory() {
         return <span className="status-warning">Low Stock</span>;
       case "out":
         return <span className="status-low">Critical Stock</span>;
-      case "warning":
-        return <span className="status-low">Expiring Soon</span>;
       default:
         return <span className="status-normal">In Stock</span>;
     }
@@ -347,6 +424,154 @@ export default function Inventory() {
     }
 
     return getStatusFromQuantity(group.totalQuantity);
+  };
+
+  const groupedProductsByStatus = useMemo(
+    () =>
+      groupedProducts.filter((group) => {
+        if (statusFilter === "all") {
+          return true;
+        }
+
+        const groupStatus = getGroupStatus(group);
+
+        switch (statusFilter) {
+          case "in-stock":
+            return groupStatus === "normal";
+          case "low-stock":
+            return groupStatus === "low";
+          case "critical":
+            return groupStatus === "out";
+          default:
+            return true;
+        }
+      }),
+    [groupedProducts, statusFilter],
+  );
+
+  useEffect(() => {
+    const visibleGroupKeys = new Set(groupedProductsByStatus.map((group) => group.key));
+
+    setExpandedGroups((currentGroups) =>
+      currentGroups.filter((groupKey) => visibleGroupKeys.has(groupKey)),
+    );
+  }, [groupedProductsByStatus]);
+
+  const getDraftQuantityValue = (group: ProductGroup) =>
+    quantityDrafts[group.key] ?? String(group.totalQuantity);
+
+  const getNormalizedDraftQuantity = (group: ProductGroup) => {
+    const draftValue = getDraftQuantityValue(group);
+
+    if (!draftValue.trim()) {
+      return group.totalQuantity;
+    }
+
+    const parsedValue = Number.parseInt(draftValue, 10);
+    return Number.isNaN(parsedValue) ? group.totalQuantity : Math.max(0, parsedValue);
+  };
+
+  const isGroupQuantityDirty = (group: ProductGroup) =>
+    getNormalizedDraftQuantity(group) !== group.totalQuantity;
+
+  const handleQuantityDraftChange = (groupKey: string, value: string) => {
+    const normalizedValue = value.replace(/[^\d]/g, "");
+
+    setQuantityDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [groupKey]: normalizedValue,
+    }));
+  };
+
+  const handleQuantityDraftBlur = (group: ProductGroup) => {
+    setQuantityDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [group.key]: String(getNormalizedDraftQuantity(group)),
+    }));
+  };
+
+  const handleAdjustGroupQuantity = (group: ProductGroup, delta: number) => {
+    const nextQuantity = Math.max(0, getNormalizedDraftQuantity(group) + delta);
+
+    setQuantityDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [group.key]: String(nextQuantity),
+    }));
+  };
+
+  const saveGroupQuantityMutation = useMutation({
+    mutationFn: async ({ group, nextQuantity }: { group: ProductGroup; nextQuantity: number }) => {
+      if (!user) {
+        throw new Error("You must be signed in to update inventory.");
+      }
+
+      const updates = buildGroupQuantityUpdatePlan(group, nextQuantity);
+      const appliedUpdates: ProductQuantityUpdatePlan[] = [];
+
+      try {
+        for (const update of updates) {
+          const { error } = await supabase
+            .from("products")
+            .update({
+              quantity: update.nextQuantity,
+              status: update.nextStatus,
+            })
+            .eq("id", update.id)
+            .eq("user_id", user.id);
+
+          if (error) {
+            throw error;
+          }
+
+          appliedUpdates.push(update);
+        }
+      } catch (error) {
+        for (const update of [...appliedUpdates].reverse()) {
+          await supabase
+            .from("products")
+            .update({
+              quantity: update.previousQuantity,
+              status: update.previousStatus,
+            })
+            .eq("id", update.id)
+            .eq("user_id", user.id);
+        }
+
+        throw error;
+      }
+
+      return {
+        groupKey: group.key,
+        nextQuantity,
+        productName: group.name,
+      };
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to update inventory quantity.");
+    },
+    onSuccess: async ({ groupKey, nextQuantity, productName }) => {
+      setQuantityDrafts((currentDrafts) => ({
+        ...currentDrafts,
+        [groupKey]: String(nextQuantity),
+      }));
+
+      toast.success(`Saved quantity changes for ${productName}.`);
+      await queryClient.invalidateQueries({ queryKey: ["products", user?.id] });
+      await queryClient.refetchQueries({ queryKey: ["products", user?.id] });
+    },
+  });
+
+  const handleSaveGroupQuantity = (group: ProductGroup) => {
+    const nextQuantity = getNormalizedDraftQuantity(group);
+
+    if (nextQuantity === group.totalQuantity) {
+      return;
+    }
+
+    saveGroupQuantityMutation.mutate({
+      group,
+      nextQuantity,
+    });
   };
 
   const deleteExpiredProductMutation = useMutation({
@@ -426,6 +651,10 @@ export default function Inventory() {
 
     if (filteredProducts.length === 0) {
       return "No inventory matches the current search or category filter.";
+    }
+
+    if (statusFilter !== "all" && groupedProducts.length > 0 && groupedProductsByStatus.length === 0) {
+      return "No active inventory matches the selected status filter.";
     }
 
     return "No active inventory matches the current filters. Expired batches are listed below.";
@@ -511,80 +740,155 @@ export default function Inventory() {
                   <TableHead className="text-[#4c4c4c]">Stock</TableHead>
                   <TableHead className="text-[#4c4c4c]">Price</TableHead>
                   <TableHead className="text-[#4c4c4c]">Expiry</TableHead>
-                  <TableHead className="text-[#4c4c4c]">Status</TableHead>
+                  <TableHead className="text-[#4c4c4c]">
+                    <Select
+                      value={statusFilter}
+                      onValueChange={(value) => setStatusFilter(value as InventoryStatusFilter)}
+                    >
+                      <SelectTrigger
+                        aria-label="Filter inventory by status"
+                        className="h-8 w-[150px] rounded-[4px] border border-white/30 bg-transparent px-3 text-xs font-medium text-[#4c4c4c] shadow-none hover:bg-white/10 focus:ring-1 focus:ring-[#cf5a5a] focus:ring-offset-0"
+                      >
+                        <SelectValue placeholder="Status" />
+                      </SelectTrigger>
+                      <SelectContent className="border-[#d9d2c9] bg-[#f7f4ef] text-[#171717]">
+                        {STATUS_FILTER_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </TableHead>
                   <TableHead className="text-right text-[#4c4c4c]">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {groupedProducts.length === 0 ? (
+                {groupedProductsByStatus.length === 0 ? (
                   <TableRow className="border-white/0">
                     <TableCell colSpan={7} className="py-12 text-center text-[#686868]">
                       {getActiveInventoryEmptyState()}
                     </TableCell>
                   </TableRow>
                 ) : (
-                  groupedProducts.map((group) => {
+                  groupedProductsByStatus.map((group) => {
                     const isExpanded = expandedGroups.includes(group.key);
                     const hasMultipleBatches = group.batchCount > 1;
+                    const draftQuantity = getDraftQuantityValue(group);
+                    const isSavingGroup =
+                      saveGroupQuantityMutation.isPending &&
+                      saveGroupQuantityMutation.variables?.group.key === group.key;
+                    const hasUnsavedQuantityChange = isGroupQuantityDirty(group);
 
                     return (
                       <Fragment key={group.key}>
                         <TableRow className="border-b border-white/25 hover:bg-white/15">
                           <TableCell className="font-medium text-[#171717]">
-                            <div className="flex items-center gap-3">
-                              <div
-                                className="product-thumb text-white"
-                                style={{ backgroundColor: getProductColor(group.name) }}
+                            {hasMultipleBatches ? (
+                              <button
+                                type="button"
+                                onClick={() => toggleGroup(group.key)}
+                                aria-expanded={isExpanded}
+                                className="-m-2 flex w-full items-center gap-3 rounded-[4px] p-2 text-left transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#cf5a5a]"
                               >
-                                {group.name.slice(0, 1).toUpperCase()}
-                              </div>
-                              <div>
-                                <div className="flex items-center gap-2">
-                                  {hasMultipleBatches ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => toggleGroup(group.key)}
-                                      className="text-[#666] transition-colors hover:text-[#171717]"
-                                      aria-expanded={isExpanded}
-                                    >
-                                      {isExpanded ? (
-                                        <ChevronDown className="h-4 w-4" />
-                                      ) : (
-                                        <ChevronRight className="h-4 w-4" />
-                                      )}
-                                    </button>
-                                  ) : null}
-                                  <span>{group.name}</span>
+                                <div
+                                  className="product-thumb text-white"
+                                  style={{ backgroundColor: getProductColor(group.name) }}
+                                >
+                                  {group.name.slice(0, 1).toUpperCase()}
                                 </div>
-                                <p className="text-xs text-[#666]">
-                                  {hasMultipleBatches
-                                    ? `${group.batchCount} stock batches`
-                                    : "Single batch"}
-                                </p>
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    {isExpanded ? (
+                                      <ChevronDown className="h-4 w-4 text-[#666]" />
+                                    ) : (
+                                      <ChevronRight className="h-4 w-4 text-[#666]" />
+                                    )}
+                                    <span>{group.name}</span>
+                                  </div>
+                                  <p className="text-xs text-[#666]">
+                                    {group.batchCount} stock batches
+                                  </p>
+                                </div>
+                              </button>
+                            ) : (
+                              <div className="flex items-center gap-3">
+                                <div
+                                  className="product-thumb text-white"
+                                  style={{ backgroundColor: getProductColor(group.name) }}
+                                >
+                                  {group.name.slice(0, 1).toUpperCase()}
+                                </div>
+                                <div>
+                                  <span>{group.name}</span>
+                                  <p className="text-xs text-[#666]">Single batch</p>
+                                </div>
                               </div>
-                            </div>
+                            )}
                           </TableCell>
                           <TableCell className="text-[#444]">{group.category}</TableCell>
-                          <TableCell className="text-[#171717]">{group.totalQuantity}</TableCell>
+                          <TableCell className="text-[#171717]">
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleAdjustGroupQuantity(group, -1)}
+                                disabled={saveGroupQuantityMutation.isPending}
+                                className="flex h-8 w-8 items-center justify-center rounded-[4px] border border-white/30 bg-white/10 text-sm font-medium text-[#171717] transition-colors hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+                                aria-label={`Decrease ${group.name} quantity`}
+                              >
+                                -
+                              </button>
+                              <Input
+                                inputMode="numeric"
+                                aria-label={`${group.name} quantity`}
+                                value={draftQuantity}
+                                onChange={(event) =>
+                                  handleQuantityDraftChange(group.key, event.target.value)
+                                }
+                                onBlur={() => handleQuantityDraftBlur(group)}
+                                disabled={saveGroupQuantityMutation.isPending}
+                                className="h-8 w-20 rounded-[4px] border-white/30 bg-white/10 px-2 text-center text-sm text-[#171717] focus-visible:ring-1 focus-visible:ring-[#cf5a5a] focus-visible:ring-offset-0"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleAdjustGroupQuantity(group, 1)}
+                                disabled={saveGroupQuantityMutation.isPending}
+                                className="flex h-8 w-8 items-center justify-center rounded-[4px] border border-white/30 bg-white/10 text-sm font-medium text-[#171717] transition-colors hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-50"
+                                aria-label={`Increase ${group.name} quantity`}
+                              >
+                                +
+                              </button>
+                            </div>
+                          </TableCell>
                           <TableCell className="text-[#171717]">
                             {formatCurrency(unitPriceByName.get(group.name) ?? 0)}
                           </TableCell>
                           <TableCell className="text-[#444]">{group.earliestExpiry ?? "-"}</TableCell>
-                          <TableCell>{getStatusBadge(getGroupStatus(group))}</TableCell>
+                          <TableCell>
+                            <div className="flex flex-wrap items-center gap-2">
+                              {getStatusBadge(getGroupStatus(group))}
+                              {isExpiringSoon(group.earliestExpiry) ? (
+                                <span className="status-warning">Expiring Soon</span>
+                              ) : null}
+                            </div>
+                          </TableCell>
                           <TableCell className="text-right">
-                            {hasMultipleBatches ? (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => toggleGroup(group.key)}
-                                className="h-8 text-[#171717] hover:bg-white/50"
-                              >
-                                {isExpanded ? "Hide" : "View"}
-                              </Button>
-                            ) : (
-                              <span className="text-xs text-[#666]">-</span>
-                            )}
+                            <Button
+                              type="button"
+                              size="sm"
+                              onClick={() => handleSaveGroupQuantity(group)}
+                              disabled={!hasUnsavedQuantityChange || saveGroupQuantityMutation.isPending}
+                              className="h-8 rounded-[4px] bg-[#6b95df] px-3 text-xs font-medium text-white hover:bg-[#5f88d1]"
+                            >
+                              {isSavingGroup ? (
+                                <>
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                  Saving
+                                </>
+                              ) : (
+                                "Save Changes"
+                              )}
+                            </Button>
                           </TableCell>
                         </TableRow>
                         {hasMultipleBatches && isExpanded ? (
@@ -600,7 +904,12 @@ export default function Inventory() {
                                       Expiry: {product.expiry_date ?? "-"}
                                     </p>
                                     <p className="text-xs text-[#666]">Stock: {product.quantity}</p>
-                                    <div className="mt-2">{getStatusBadge(product.status)}</div>
+                                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                                      {getStatusBadge(product.status)}
+                                      {isExpiringSoon(product.expiry_date) ? (
+                                        <span className="status-warning">Expiring Soon</span>
+                                      ) : null}
+                                    </div>
                                   </div>
                                 ))}
                               </div>

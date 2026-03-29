@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CartesianGrid,
   Legend,
@@ -9,7 +9,19 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { AlertTriangle, Brain, Clock, Loader2 } from "lucide-react";
+import { jsPDF } from "jspdf";
+import html2canvas from "html2canvas";
+import {
+  Brain,
+  CalendarDays,
+  Clock,
+  Clock3,
+  Download,
+  Loader2,
+  TrendingDown,
+  TrendingUp,
+  Wallet,
+} from "lucide-react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
@@ -25,7 +37,6 @@ import {
   buildInsights,
   buildDemandPlanningResult,
   buildMockTransactions,
-  buildRecommendations,
   buildWasteAlerts,
   buildWasteTips,
   calculateSalesTrends,
@@ -37,6 +48,7 @@ import {
 
 type Product = Tables<"products">;
 type Transaction = Tables<"transactions">;
+const EMPTY_TRANSACTIONS: Transaction[] = [];
 
 const demandLevelStyles = {
   "High demand": "bg-[#d7f6e3] text-[#2f7b54]",
@@ -56,10 +68,23 @@ const confidenceStyles: Record<ForecastConfidence, string> = {
   medium: "bg-[#fff2ab] text-[#8a6b08]",
 };
 
+const summarizeForecastText = (text: string, maxWords = 16) => {
+  const firstSentence = text.split(/(?<=[.!?])\s+/)[0]?.trim() ?? "";
+  const normalizedText = firstSentence || text.trim();
+  const words = normalizedText.split(/\s+/).filter(Boolean);
+
+  if (words.length <= maxWords) {
+    return normalizedText;
+  }
+
+  return `${words.slice(0, maxWords).join(" ")}...`;
+};
+
 export default function Forecast() {
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [forecastVersion, setForecastVersion] = useState(0);
   const [isSeeding, setIsSeeding] = useState(false);
+  const forecastContentRef = useRef<HTMLDivElement | null>(null);
 
   const { user } = useAuthContext();
   const queryClient = useQueryClient();
@@ -142,7 +167,7 @@ export default function Forecast() {
     },
   });
 
-  const transactions = transactionResult?.items ?? [];
+  const transactions = transactionResult?.items ?? EMPTY_TRANSACTIONS;
   const usingMockTransactions = transactionResult?.source === "mock";
 
   const categories = useMemo(() => {
@@ -248,16 +273,6 @@ export default function Forecast() {
       }),
     [lowStockProduct, overstockProduct, salesTrends, selectedCategory, topSeller, wasteAlerts],
   );
-  const recommendations = useMemo(
-    () =>
-      buildRecommendations({
-        expiryAlerts: wasteAlerts,
-        lowStockProduct,
-        overstockProduct,
-        topSellerName: topSeller?.name,
-      }),
-    [lowStockProduct, overstockProduct, topSeller, wasteAlerts],
-  );
   const wasteTips = useMemo(
     () => buildWasteTips({ expiryAlerts: wasteAlerts, lowStockProduct, overstockProduct }),
     [lowStockProduct, overstockProduct, wasteAlerts],
@@ -274,20 +289,88 @@ export default function Forecast() {
 
   const isLoading = isProductsLoading || isTransactionsLoading || isSeeding;
   const hasLoadError = Boolean(productsError || transactionsError);
+  const GrowthIcon = salesTrends.growth >= 0 ? TrendingUp : TrendingDown;
+
+  const handleExportPDF = async () => {
+    if (!forecastContentRef.current) {
+      toast.error("Nothing is ready to export yet.");
+      return;
+    }
+
+    const canvas = await html2canvas(forecastContentRef.current, {
+      backgroundColor: "#fbfaf7",
+      scale: 2,
+    });
+
+    const document = new jsPDF({ format: "a4", unit: "mm" });
+    const pageWidth = document.internal.pageSize.getWidth();
+    const pageHeight = document.internal.pageSize.getHeight();
+    const horizontalMargin = 10;
+    const topMargin = 12;
+    const imageWidth = pageWidth - horizontalMargin * 2;
+    const imageHeight = (canvas.height * imageWidth) / canvas.width;
+    const imageData = canvas.toDataURL("image/png");
+
+    document.setFontSize(18);
+    document.text("AI Demand Forecasting", horizontalMargin, topMargin);
+    document.setFontSize(10);
+    document.setTextColor(95, 90, 86);
+    document.text(`Category filter: ${selectedCategory}`, horizontalMargin, topMargin + 6);
+
+    const contentTopY = topMargin + 10;
+    let remainingImageHeight = imageHeight - (pageHeight - contentTopY);
+    let imagePositionY = contentTopY;
+
+    document.addImage(
+      imageData,
+      "PNG",
+      horizontalMargin,
+      contentTopY,
+      imageWidth,
+      imageHeight,
+    );
+    remainingImageHeight -= pageHeight - contentTopY;
+
+    while (remainingImageHeight > 0) {
+      document.addPage();
+      imagePositionY -= pageHeight - topMargin;
+      document.addImage(
+        imageData,
+        "PNG",
+        horizontalMargin,
+        imagePositionY,
+        imageWidth,
+        imageHeight,
+      );
+      remainingImageHeight -= pageHeight - topMargin;
+    }
+
+    document.save(`bag-invent-forecast-${selectedCategory.toLowerCase().replace(/\s+/g, "-")}.pdf`);
+  };
 
   return (
     <DashboardLayout pageLabel="AI Demand Forecasting">
       <div className="space-y-6">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <h1 className="text-[2rem] font-medium text-[#171717]">AI Demand Forecasting</h1>
-          <Button
-            className="h-10 rounded-[4px] bg-[#cf5a5a] px-5 text-white hover:bg-[#c55252]"
-            onClick={() => setForecastVersion((currentValue) => currentValue + 1)}
-            disabled={isLoading || hasLoadError}
-          >
-            <Brain className="mr-2 h-4 w-4" />
-            Refresh Forecast
-          </Button>
+          <div className="flex flex-wrap gap-3">
+            <Button
+              className="h-10 rounded-[4px] bg-[#d8d8d8] px-5 text-[#171717] hover:bg-[#cccccc]"
+              onClick={handleExportPDF}
+              disabled={isLoading || hasLoadError}
+            >
+              <Download className="mr-2 h-4 w-4" />
+              Export PDF
+            </Button>
+            <Button
+              className="h-10 rounded-[4px] bg-[#cf5a5a] px-5 text-white hover:bg-[#c55252]"
+              onClick={() => setForecastVersion((currentValue) => currentValue + 1)}
+              disabled={isLoading || hasLoadError}
+            >
+              <Brain className="mr-2 h-4 w-4" />
+              Refresh Forecast
+            </Button>
+          </div>
         </div>
 
         {hasLoadError ? (
@@ -304,14 +387,14 @@ export default function Forecast() {
             </div>
           </div>
         ) : (
-          <>
+          <div ref={forecastContentRef} className="space-y-6">
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
               <div className="workspace-panel">
                 <h2 className="text-lg font-medium text-[#171717]">AI Insight Summary</h2>
                 <div className="mt-4 space-y-4 text-sm text-[#333]">
                   {aiInsights.map((insight) => (
                     <div key={insight.text} className="space-y-1">
-                      <p>{insight.text}</p>
+                      <p>{summarizeForecastText(insight.text, 16)}</p>
                     </div>
                   ))}
                 </div>
@@ -319,25 +402,68 @@ export default function Forecast() {
 
               <div className="workspace-panel">
                 <h2 className="text-lg font-medium text-[#171717]">Sales Trends</h2>
-                <div className="mt-4 grid grid-cols-2 gap-4 text-[#171717]">
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.16em] text-[#666]">Weekly Growth</p>
-                    <p className="mt-2 text-2xl font-medium">
-                      {salesTrends.growth >= 0 ? "+" : ""}
-                      {salesTrends.growth}%
-                    </p>
+                <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="rounded-[4px] bg-[#efebe6] p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.16em] text-[#666]">Weekly Growth</p>
+                        <p className="mt-2 text-2xl font-medium text-[#171717]">
+                          {salesTrends.growth >= 0 ? "+" : ""}
+                          {salesTrends.growth}%
+                        </p>
+                      </div>
+                      <span
+                        className={`flex h-10 w-10 items-center justify-center rounded-full ${
+                          salesTrends.growth >= 0
+                            ? "bg-[#d7f6e3] text-[#2f7b54]"
+                            : "bg-[#ffd9d9] text-[#b34d4d]"
+                        }`}
+                      >
+                        <GrowthIcon className="h-5 w-5" />
+                      </span>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.16em] text-[#666]">Best Day</p>
-                    <p className="mt-2 text-2xl font-medium">{salesTrends.bestDay}</p>
+
+                  <div className="rounded-[4px] bg-[#efebe6] p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.16em] text-[#666]">Best Day</p>
+                        <p className="mt-2 text-2xl font-medium text-[#171717]">
+                          {salesTrends.bestDay}
+                        </p>
+                      </div>
+                      <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#dce8ff] text-[#2d63c8]">
+                        <CalendarDays className="h-5 w-5" />
+                      </span>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.16em] text-[#666]">Peak Hour</p>
-                    <p className="mt-2 text-2xl font-medium">{salesTrends.peakHour}</p>
+
+                  <div className="rounded-[4px] bg-[#efebe6] p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.16em] text-[#666]">Peak Hour</p>
+                        <p className="mt-2 text-2xl font-medium text-[#171717]">
+                          {salesTrends.peakHour}
+                        </p>
+                      </div>
+                      <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#ffe8c8] text-[#c57a17]">
+                        <Clock3 className="h-5 w-5" />
+                      </span>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.16em] text-[#666]">Avg. Basket</p>
-                    <p className="mt-2 text-2xl font-medium">{formatCurrency(salesTrends.avgBasket)}</p>
+
+                  <div className="rounded-[4px] bg-[#efebe6] p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.16em] text-[#666]">Avg. Basket</p>
+                        <p className="mt-2 text-2xl font-medium text-[#171717]">
+                          {formatCurrency(salesTrends.avgBasket)}
+                        </p>
+                      </div>
+                      <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#d7f6e3] text-[#2f7b54]">
+                        <Wallet className="h-5 w-5" />
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -427,7 +553,7 @@ export default function Forecast() {
                     <div className="mt-2 space-y-2">
                       {demandPlanning.methodology.map((item) => (
                         <p key={item} className="text-sm text-[#555]">
-                          {item}
+                          {summarizeForecastText(item, 14)}
                         </p>
                       ))}
                     </div>
@@ -437,7 +563,7 @@ export default function Forecast() {
                     <div className="mt-2 space-y-2">
                       {demandPlanning.assumptions.map((item) => (
                         <p key={item} className="text-sm text-[#555]">
-                          {item}
+                          {summarizeForecastText(item, 14)}
                         </p>
                       ))}
                     </div>
@@ -450,7 +576,7 @@ export default function Forecast() {
                 <div className="mt-4 space-y-3">
                   {demandPlanning.insights.map((insight) => (
                     <div key={insight} className="workspace-card-soft">
-                      <p className="text-sm text-[#333]">{insight}</p>
+                      <p className="text-sm text-[#333]">{summarizeForecastText(insight, 15)}</p>
                     </div>
                   ))}
                 </div>
@@ -507,7 +633,9 @@ export default function Forecast() {
                       <tr key={forecast.productId} className="border-b border-white/20 align-top">
                         <td className="px-3 py-4">
                           <p className="font-medium text-[#171717]">{forecast.productName}</p>
-                          <p className="mt-1 text-xs text-[#666]">{forecast.reasoning}</p>
+                          <p className="mt-1 text-xs text-[#666]">
+                            {summarizeForecastText(forecast.reasoning, 14)}
+                          </p>
                         </td>
                         <td className="px-3 py-4 text-sm text-[#333]">{forecast.category}</td>
                         <td className="px-3 py-4">
@@ -574,7 +702,9 @@ export default function Forecast() {
                         <div className="flex items-start justify-between gap-3">
                           <div>
                             <p className="font-medium text-[#171717]">{item.productName}</p>
-                            <p className="mt-1 text-sm text-[#555]">{item.reason}</p>
+                            <p className="mt-1 text-sm text-[#555]">
+                              {summarizeForecastText(item.reason, 16)}
+                            </p>
                           </div>
                           <span className="rounded-full bg-[#d7f6e3] px-3 py-1 text-xs font-medium text-[#2f7b54]">
                             Buy More
@@ -601,7 +731,9 @@ export default function Forecast() {
                         <div className="flex items-start justify-between gap-3">
                           <div>
                             <p className="font-medium text-[#171717]">{item.productName}</p>
-                            <p className="mt-1 text-sm text-[#555]">{item.reason}</p>
+                            <p className="mt-1 text-sm text-[#555]">
+                              {summarizeForecastText(item.reason, 16)}
+                            </p>
                           </div>
                           <span className="rounded-full bg-[#ffd9d9] px-3 py-1 text-xs font-medium text-[#b34d4d]">
                             Buy Less
@@ -614,24 +746,7 @@ export default function Forecast() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.05fr_1fr]">
-              <div className="workspace-panel">
-                <div className="mb-4 flex items-center gap-2">
-                  <AlertTriangle className="h-5 w-5 text-[#cf5a5a]" />
-                  <h2 className="text-lg font-medium text-[#171717]">AI Recommended Actions</h2>
-                </div>
-                <div className="space-y-3">
-                  {recommendations.map((recommendation) => (
-                    <div key={`${recommendation.action}-${recommendation.product}`} className="workspace-card-soft">
-                      <p className="font-medium text-[#171717]">
-                        {recommendation.action} {recommendation.product}
-                      </p>
-                      <p className="mt-1 text-sm text-[#555]">{recommendation.reason}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
+            <div className="grid grid-cols-1">
               <div className="workspace-panel">
                 <div className="mb-4 flex items-center gap-3">
                   <Clock className="h-5 w-5 text-[#666]" />
@@ -641,14 +756,16 @@ export default function Forecast() {
                   {wasteTips.map((item) => (
                     <div key={item.tip}>
                       <p className="font-medium text-[#171717]">{item.tip}</p>
-                      <p className="mt-1 text-sm text-[#555]">{item.description}</p>
+                      <p className="mt-1 text-sm text-[#555]">
+                        {summarizeForecastText(item.description, 15)}
+                      </p>
                     </div>
                   ))}
                 </div>
               </div>
             </div>
 
-          </>
+          </div>
         )}
       </div>
     </DashboardLayout>

@@ -18,6 +18,7 @@ import { toast } from "sonner";
 
 type Product = Tables<"products">;
 type Transaction = Tables<"transactions">;
+const EMPTY_TRANSACTIONS: Transaction[] = [];
 
 const getTodayDateKey = () =>
   new Date(new Date().getTime() - new Date().getTimezoneOffset() * 60000)
@@ -128,7 +129,7 @@ const Index = () => {
     },
   });
 
-  const transactions = transactionResult?.items ?? [];
+  const transactions = transactionResult?.items ?? EMPTY_TRANSACTIONS;
   const isLoading = isProductsLoading || isTransactionsLoading || isSeeding;
 
   const stats = useMemo(() => {
@@ -202,7 +203,7 @@ const Index = () => {
 
             <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.05fr_1fr]">
               <TopSellingChart />
-              <AIForecastCard />
+              <AIForecastCard products={products} transactions={transactions} />
             </div>
           </>
         )}

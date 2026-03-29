@@ -1,4 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  addDays,
+  endOfMonth,
+  endOfWeek,
+  format,
+  isAfter,
+  isBefore,
+  isEqual,
+  parseISO,
+  startOfMonth,
+  startOfWeek,
+} from "date-fns";
 import {
   Bar,
   BarChart,
@@ -13,8 +25,12 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Loader2 } from "lucide-react";
+import { Download, Loader2 } from "lucide-react";
+import html2canvas from "html2canvas";
+import { jsPDF } from "jspdf";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
 import { useAuthContext } from "@/contexts/AuthContext";
@@ -28,12 +44,122 @@ import { buildMockTransactions, formatCurrency } from "@/lib/forecastInsights";
 
 type Product = Tables<"products">;
 type Transaction = Tables<"transactions">;
+type DateFilterType = "all" | "week" | "month" | "custom";
+
+const EMPTY_TRANSACTIONS: Transaction[] = [];
+const DATE_FILTER_OPTIONS: Array<{ label: string; value: DateFilterType }> = [
+  { label: "All", value: "all" },
+  { label: "Week", value: "week" },
+  { label: "Month", value: "month" },
+  { label: "Custom Date Range", value: "custom" },
+];
 
 const getDateKey = (date: Date) =>
   new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().split("T")[0];
 
+const toDateInputValue = (value: Date) =>
+  new Date(value.getTime() - value.getTimezoneOffset() * 60000).toISOString().split("T")[0];
+
+const getToday = () => toDateInputValue(new Date());
+
+const getCustomDateRange = (customFromDate: string, customToDate: string) => {
+  const fallbackDate = customFromDate || customToDate || getToday();
+  const normalizedFromDate = customFromDate || fallbackDate;
+  const normalizedToDate = customToDate || fallbackDate;
+
+  if (normalizedFromDate.localeCompare(normalizedToDate) <= 0) {
+    return {
+      fromDate: normalizedFromDate,
+      toDate: normalizedToDate,
+    };
+  }
+
+  return {
+    fromDate: normalizedToDate,
+    toDate: normalizedFromDate,
+  };
+};
+
+const getDateRange = (filterType: DateFilterType, customFromDate: string, customToDate: string) => {
+  const today = new Date();
+
+  switch (filterType) {
+    case "week": {
+      const fromDate = toDateInputValue(startOfWeek(today));
+      const toDate = toDateInputValue(endOfWeek(today));
+
+      return {
+        fromDate,
+        toDate,
+        label: `This week: ${format(parseISO(fromDate), "MMM d")} - ${format(parseISO(toDate), "MMM d")}`,
+      };
+    }
+    case "month": {
+      const fromDate = toDateInputValue(startOfMonth(today));
+      const toDate = toDateInputValue(endOfMonth(today));
+
+      return {
+        fromDate,
+        toDate,
+        label: `This month: ${format(parseISO(fromDate), "MMM d")} - ${format(parseISO(toDate), "MMM d, yyyy")}`,
+      };
+    }
+    case "custom": {
+      const { fromDate, toDate } = getCustomDateRange(customFromDate, customToDate);
+
+      return {
+        fromDate,
+        toDate,
+        label: `Custom range: ${format(parseISO(fromDate), "MMM d, yyyy")} - ${format(parseISO(toDate), "MMM d, yyyy")}`,
+      };
+    }
+    default: {
+      return {
+        fromDate: "",
+        toDate: "",
+        label: "All dates",
+      };
+    }
+  }
+};
+
+const isDateInRange = (value: string, fromDate: string, toDate: string) => {
+  const targetDate = parseISO(value);
+  const startDate = parseISO(fromDate);
+  const endDate = parseISO(toDate);
+
+  return (
+    (isAfter(targetDate, startDate) || isEqual(targetDate, startDate)) &&
+    (isBefore(targetDate, endDate) || isEqual(targetDate, endDate))
+  );
+};
+
+const buildDateSeries = (fromDate: string, toDate: string) => {
+  const dates: Date[] = [];
+  let currentDate = parseISO(fromDate);
+  const endDate = parseISO(toDate);
+
+  while (currentDate.getTime() <= endDate.getTime()) {
+    dates.push(currentDate);
+    currentDate = addDays(currentDate, 1);
+  }
+
+  return dates;
+};
+
+const formatRangeLabel = (date: Date, totalDays: number) =>
+  totalDays <= 7
+    ? date.toLocaleDateString("en-US", { weekday: "short" })
+    : date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+
 export default function Reports() {
   const [isSeeding, setIsSeeding] = useState(false);
+  const [dateFilterType, setDateFilterType] = useState<DateFilterType>("all");
+  const [customFromDate, setCustomFromDate] = useState(getToday);
+  const [customToDate, setCustomToDate] = useState(getToday);
+  const salesPanelRef = useRef<HTMLDivElement | null>(null);
+  const movementPanelRef = useRef<HTMLDivElement | null>(null);
+  const agingPanelRef = useRef<HTMLDivElement | null>(null);
   const { user } = useAuthContext();
   const queryClient = useQueryClient();
 
@@ -115,43 +241,124 @@ export default function Reports() {
     },
   });
 
-  const transactions = transactionResult?.items ?? [];
-  const usingMockTransactions = transactionResult?.source === "mock";
+  const transactions = transactionResult?.items ?? EMPTY_TRANSACTIONS;
   const isLoading = isProductsLoading || isTransactionsLoading || isSeeding;
   const hasLoadError = Boolean(productsError || transactionsError);
+  const activeDateRange =
+    dateFilterType === "all" ? null : getDateRange(dateFilterType, customFromDate, customToDate);
+
+  const filteredTransactions = useMemo(() => {
+    if (!activeDateRange) {
+      return transactions;
+    }
+
+    return transactions.filter((transaction) =>
+      isDateInRange(transaction.date, activeDateRange.fromDate, activeDateRange.toDate),
+    );
+  }, [activeDateRange, transactions]);
+
+  const filteredProducts = useMemo(() => {
+    if (!activeDateRange) {
+      return products;
+    }
+
+    const touchedProductIds = new Set(
+      filteredTransactions
+        .map((transaction) => transaction.product_id)
+        .filter((productId): productId is string => Boolean(productId)),
+    );
+    const touchedProductNames = new Set(
+      filteredTransactions.map((transaction) => transaction.product_name.trim().toLowerCase()),
+    );
+
+    return products.filter((product) => {
+      const createdDate = toDateInputValue(new Date(product.created_at));
+
+      return (
+        touchedProductIds.has(product.id) ||
+        touchedProductNames.has(product.name.trim().toLowerCase()) ||
+        isDateInRange(createdDate, activeDateRange.fromDate, activeDateRange.toDate)
+      );
+    });
+  }, [activeDateRange, filteredTransactions, products]);
 
   const salesData = useMemo(() => {
-    const today = new Date();
     const dailyTotals = new Map<string, number>();
 
-    transactions
+    filteredTransactions
       .filter((transaction) => transaction.type === "sale")
       .forEach((transaction) => {
         dailyTotals.set(transaction.date, (dailyTotals.get(transaction.date) ?? 0) + transaction.amount);
       });
 
-    return Array.from({ length: 7 }, (_, index) => {
-      const date = new Date(today);
-      date.setDate(today.getDate() - (6 - index));
-      const key = getDateKey(date);
+    if (!activeDateRange) {
+      const today = new Date();
 
+      return Array.from({ length: 7 }, (_, index) => {
+        const date = new Date(today);
+        date.setDate(today.getDate() - (6 - index));
+        const key = getDateKey(date);
+
+        return {
+          label: date.toLocaleDateString("en-US", { weekday: "short" }),
+          sales: dailyTotals.get(key) ?? 0,
+        };
+      });
+    }
+
+    const rangeDates = buildDateSeries(activeDateRange.fromDate, activeDateRange.toDate);
+
+    return rangeDates.map((date) => {
+      const key = getDateKey(date);
       return {
-        day: date.toLocaleDateString("en-US", { weekday: "short" }),
+        label: formatRangeLabel(date, rangeDates.length),
         sales: dailyTotals.get(key) ?? 0,
       };
     });
-  }, [transactions]);
+  }, [activeDateRange, filteredTransactions]);
 
   const inventoryMovement = useMemo(() => {
-    const now = new Date();
-    const monthlyTotals = new Map<string, { incoming: number; outgoing: number }>();
+    if (!activeDateRange) {
+      const now = new Date();
+      const monthlyTotals = new Map<string, { incoming: number; outgoing: number }>();
 
-    transactions.forEach((transaction) => {
-      const date = new Date(transaction.date);
-      const key = `${date.getFullYear()}-${date.getMonth()}`;
-      const currentValue = monthlyTotals.get(key) ?? { incoming: 0, outgoing: 0 };
+      filteredTransactions.forEach((transaction) => {
+        const date = new Date(transaction.date);
+        const key = `${date.getFullYear()}-${date.getMonth()}`;
+        const currentValue = monthlyTotals.get(key) ?? { incoming: 0, outgoing: 0 };
 
-      monthlyTotals.set(key, {
+        monthlyTotals.set(key, {
+          incoming:
+            transaction.type === "incoming"
+              ? currentValue.incoming + transaction.quantity
+              : currentValue.incoming,
+          outgoing:
+            transaction.type === "sale"
+              ? currentValue.outgoing + transaction.quantity
+              : currentValue.outgoing,
+        });
+      });
+
+      return Array.from({ length: 6 }, (_, index) => {
+        const date = new Date(now.getFullYear(), now.getMonth() - (5 - index), 1);
+        const key = `${date.getFullYear()}-${date.getMonth()}`;
+        const totals = monthlyTotals.get(key) ?? { incoming: 0, outgoing: 0 };
+
+        return {
+          incoming: totals.incoming,
+          label: date.toLocaleDateString("en-US", { month: "short" }),
+          outgoing: totals.outgoing,
+        };
+      });
+    }
+
+    const dailyTotals = new Map<string, { incoming: number; outgoing: number }>();
+    const rangeDates = buildDateSeries(activeDateRange.fromDate, activeDateRange.toDate);
+
+    filteredTransactions.forEach((transaction) => {
+      const currentValue = dailyTotals.get(transaction.date) ?? { incoming: 0, outgoing: 0 };
+
+      dailyTotals.set(transaction.date, {
         incoming:
           transaction.type === "incoming"
             ? currentValue.incoming + transaction.quantity
@@ -163,18 +370,17 @@ export default function Reports() {
       });
     });
 
-    return Array.from({ length: 6 }, (_, index) => {
-      const date = new Date(now.getFullYear(), now.getMonth() - (5 - index), 1);
-      const key = `${date.getFullYear()}-${date.getMonth()}`;
-      const totals = monthlyTotals.get(key) ?? { incoming: 0, outgoing: 0 };
+    return rangeDates.map((date) => {
+      const key = getDateKey(date);
+      const totals = dailyTotals.get(key) ?? { incoming: 0, outgoing: 0 };
 
       return {
         incoming: totals.incoming,
-        month: date.toLocaleDateString("en-US", { month: "short" }),
+        label: formatRangeLabel(date, rangeDates.length),
         outgoing: totals.outgoing,
       };
     });
-  }, [transactions]);
+  }, [activeDateRange, filteredTransactions]);
 
   const stockAging = useMemo(() => {
     const totals = {
@@ -184,7 +390,7 @@ export default function Reports() {
       noExpiry: 0,
     };
 
-    products.forEach((product) => {
+    filteredProducts.forEach((product) => {
       if (product.quantity <= 0) return;
 
       if (!product.expiry_date) {
@@ -218,13 +424,131 @@ export default function Reports() {
       { color: "#5aa36c", name: "Healthy (31+ days)", units: totals.healthy, value: toPercent(totals.healthy) },
       { color: "#2d63c8", name: "No Expiry", units: totals.noExpiry, value: toPercent(totals.noExpiry) },
     ].filter((item) => item.units > 0);
-  }, [products]);
+  }, [filteredProducts]);
+
+  const handleExportPDF = async () => {
+    const reportPanels = [
+      { element: salesPanelRef.current, title: activeDateRange ? "Sales Trend" : "Weekly Sales" },
+      { element: movementPanelRef.current, title: "Inventory Movement" },
+      { element: agingPanelRef.current, title: "Stock Aging Distribution" },
+    ].filter((panel): panel is { element: HTMLDivElement; title: string } => Boolean(panel.element));
+
+    if (reportPanels.length === 0) {
+      toast.error("Nothing is ready to export yet.");
+      return;
+    }
+
+    const document = new jsPDF({ format: "a4", unit: "mm" });
+    const pageHeight = document.internal.pageSize.getHeight();
+    const pageWidth = document.internal.pageSize.getWidth();
+    const horizontalMargin = 12;
+    const maxImageWidth = pageWidth - horizontalMargin * 2;
+    const filterLabel = activeDateRange?.label ?? "All dates";
+    let currentY = 18;
+
+    document.setFontSize(18);
+    document.text("Reports", horizontalMargin, currentY);
+    currentY += 7;
+
+    document.setFontSize(10);
+    document.setTextColor(95, 90, 86);
+    document.text(`Date filter: ${filterLabel}`, horizontalMargin, currentY);
+    currentY += 8;
+
+    for (const panel of reportPanels) {
+      const canvas = await html2canvas(panel.element, {
+        backgroundColor: "#fbfaf7",
+        scale: 2,
+      });
+
+      const imageWidth = maxImageWidth;
+      const imageHeight = (canvas.height * imageWidth) / canvas.width;
+
+      if (currentY + imageHeight + 12 > pageHeight) {
+        document.addPage();
+        currentY = 18;
+      }
+
+      document.setFontSize(12);
+      document.setTextColor(23, 23, 23);
+      document.text(panel.title, horizontalMargin, currentY);
+      currentY += 4;
+
+      document.addImage(
+        canvas.toDataURL("image/png"),
+        "PNG",
+        horizontalMargin,
+        currentY,
+        imageWidth,
+        imageHeight,
+      );
+      currentY += imageHeight + 10;
+    }
+
+    const fileDateFragment = (activeDateRange?.toDate ?? getToday()).replaceAll("-", "");
+    document.save(`bag-invent-reports-${fileDateFragment}.pdf`);
+  };
 
   return (
     <DashboardLayout pageLabel="Reports">
       <div className="space-y-6">
-        <div>
-          <h1 className="text-[2rem] font-medium text-[#171717]">Reports</h1>
+        <div className="space-y-4">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+            <div>
+              <h1 className="text-[2rem] font-medium text-[#171717]">Reports</h1>
+              {activeDateRange ? (
+                <p className="mt-2 text-sm text-[#5f5a56]">{activeDateRange.label}</p>
+              ) : null}
+            </div>
+
+            <div className="flex flex-col gap-3 xl:items-end">
+              <Button
+                type="button"
+                onClick={handleExportPDF}
+                disabled={isLoading || hasLoadError}
+                className="h-10 rounded-[4px] bg-[#d8d8d8] px-4 text-sm font-medium text-[#171717] hover:bg-[#cccccc]"
+              >
+                <Download className="h-4 w-4" />
+                Export PDF
+              </Button>
+
+              <div className="flex flex-wrap gap-2 xl:justify-end">
+                {DATE_FILTER_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setDateFilterType(option.value)}
+                    className={
+                      dateFilterType === option.value
+                        ? "rounded-[4px] border border-[#cf5a5a] bg-[#f6dede] px-3 py-2 text-xs font-medium text-[#171717]"
+                        : "rounded-[4px] border border-[#dfd8cf] bg-[#efebe6] px-3 py-2 text-xs font-medium text-[#171717] hover:bg-[#e7e1d8]"
+                    }
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {dateFilterType === "custom" ? (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:max-w-[360px] xl:ml-auto">
+              <Input
+                aria-label="Custom report start date"
+                type="date"
+                value={customFromDate}
+                onChange={(event) => setCustomFromDate(event.target.value)}
+                className="h-10 rounded-[4px] border-[#dfd8cf] bg-[#efebe6] text-sm text-[#171717] focus-visible:ring-1 focus-visible:ring-[#cf5a5a] focus-visible:ring-offset-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-70"
+              />
+              <Input
+                aria-label="Custom report end date"
+                type="date"
+                value={customToDate}
+                onChange={(event) => setCustomToDate(event.target.value)}
+                className="h-10 rounded-[4px] border-[#dfd8cf] bg-[#efebe6] text-sm text-[#171717] focus-visible:ring-1 focus-visible:ring-[#cf5a5a] focus-visible:ring-offset-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-70"
+              />
+            </div>
+          ) : null}
         </div>
 
         {hasLoadError ? (
@@ -235,8 +559,10 @@ export default function Reports() {
         ) : null}
 
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-          <div className="workspace-panel">
-            <h2 className="mb-4 text-lg font-medium text-[#171717]">Weekly Sales</h2>
+          <div ref={salesPanelRef} className="workspace-panel">
+            <h2 className="mb-4 text-lg font-medium text-[#171717]">
+              {activeDateRange ? "Sales Trend" : "Weekly Sales"}
+            </h2>
             <div className="h-[300px]">
               {isLoading ? (
                 <div className="flex h-full items-center justify-center">
@@ -246,7 +572,13 @@ export default function Reports() {
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={salesData}>
                     <CartesianGrid stroke="#bdb4aa" vertical={false} />
-                    <XAxis dataKey="day" stroke="#3a3a3a" fontSize={11} tickLine={false} />
+                    <XAxis
+                      dataKey="label"
+                      stroke="#3a3a3a"
+                      fontSize={11}
+                      tickLine={false}
+                      minTickGap={8}
+                    />
                     <YAxis stroke="#3a3a3a" fontSize={11} tickLine={false} />
                     <Tooltip
                       contentStyle={{
@@ -268,7 +600,7 @@ export default function Reports() {
             </div>
           </div>
 
-          <div className="workspace-panel">
+          <div ref={movementPanelRef} className="workspace-panel">
             <h2 className="mb-4 text-lg font-medium text-[#171717]">Inventory Movement</h2>
             <div className="h-[300px]">
               {isLoading ? (
@@ -279,7 +611,13 @@ export default function Reports() {
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={inventoryMovement}>
                     <CartesianGrid stroke="#bdb4aa" vertical={false} />
-                    <XAxis dataKey="month" stroke="#3a3a3a" fontSize={11} tickLine={false} />
+                    <XAxis
+                      dataKey="label"
+                      stroke="#3a3a3a"
+                      fontSize={11}
+                      tickLine={false}
+                      minTickGap={8}
+                    />
                     <YAxis stroke="#3a3a3a" fontSize={11} tickLine={false} />
                     <Tooltip
                       contentStyle={{
@@ -298,7 +636,7 @@ export default function Reports() {
             </div>
           </div>
 
-          <div className="workspace-panel xl:col-span-2">
+          <div ref={agingPanelRef} className="workspace-panel xl:col-span-2">
             <h2 className="mb-4 text-lg font-medium text-[#171717]">Stock Aging Distribution</h2>
             {isLoading ? (
               <div className="flex items-center justify-center py-12">
@@ -306,7 +644,9 @@ export default function Reports() {
               </div>
             ) : stockAging.length === 0 ? (
               <div className="workspace-card-soft text-sm text-[#666]">
-                Stock aging will appear here once inventory quantities and expiry dates are available.
+                {activeDateRange
+                  ? "No stock aging data matches the selected date range."
+                  : "Stock aging will appear here once inventory quantities and expiry dates are available."}
               </div>
             ) : (
               <div className="flex flex-col items-center gap-8 lg:flex-row">
