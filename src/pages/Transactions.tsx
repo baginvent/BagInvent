@@ -8,6 +8,7 @@ import {
   FileSpreadsheet,
   Loader2,
   Plus,
+  Trash2,
   Upload,
   X,
 } from "lucide-react";
@@ -37,6 +38,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Table,
   TableBody,
@@ -769,7 +780,7 @@ const saveTransactionRecord = async ({
 
       if (usingMockTransactions) {
         await applyProductUpdatePlan(productUpdates);
-        addMockTransaction(buildTransactionInput(matchingBatch));
+        await addMockTransaction(buildTransactionInput(matchingBatch));
         return applyInventoryUpdatesToSnapshot(inventory, productUpdates);
       }
 
@@ -791,7 +802,7 @@ const saveTransactionRecord = async ({
       if (insertError) {
         if (isMissingTransactionsTableError(insertError)) {
           await applyProductUpdatePlan(productUpdates);
-          addMockTransaction(buildTransactionInput(matchingBatch));
+          await addMockTransaction(buildTransactionInput(matchingBatch));
           return applyInventoryUpdatesToSnapshot(inventory, productUpdates);
         }
 
@@ -826,7 +837,7 @@ const saveTransactionRecord = async ({
     }
 
     if (usingMockTransactions) {
-      addMockTransaction(buildTransactionInput(createdProduct));
+      await addMockTransaction(buildTransactionInput(createdProduct));
       return [...inventory, createdProduct];
     }
 
@@ -843,7 +854,7 @@ const saveTransactionRecord = async ({
 
     if (insertTransactionError) {
       if (isMissingTransactionsTableError(insertTransactionError)) {
-        addMockTransaction(buildTransactionInput(createdProduct));
+        await addMockTransaction(buildTransactionInput(createdProduct));
         return [...inventory, createdProduct];
       }
 
@@ -890,7 +901,7 @@ const saveTransactionRecord = async ({
 
   if (usingMockTransactions) {
     await applyProductUpdatePlan(productUpdates);
-    addMockTransaction(transactionInput);
+    await addMockTransaction(transactionInput);
     return applyInventoryUpdatesToSnapshot(inventory, productUpdates);
   }
 
@@ -912,7 +923,7 @@ const saveTransactionRecord = async ({
   if (insertError) {
     if (isMissingTransactionsTableError(insertError)) {
       await applyProductUpdatePlan(productUpdates);
-      addMockTransaction(transactionInput);
+      await addMockTransaction(transactionInput);
       return applyInventoryUpdatesToSnapshot(inventory, productUpdates);
     }
 
@@ -939,6 +950,10 @@ export default function Transactions() {
   const [isSeeding, setIsSeeding] = useState(false);
   const [isParsingImport, setIsParsingImport] = useState(false);
   const [pendingIncomingImport, setPendingIncomingImport] = useState<PendingIncomingImport | null>(
+    null,
+  );
+  const [pendingDeleteTransactionId, setPendingDeleteTransactionId] = useState<string | null>(null);
+  const [pendingAddTransactionForm, setPendingAddTransactionForm] = useState<TransactionForm | null>(
     null,
   );
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -1360,6 +1375,33 @@ export default function Transactions() {
     },
   });
 
+  const deleteTransactionMutation = useMutation({
+    mutationFn: async (transactionId: string) => {
+      if (!user) {
+        throw new Error("You need to sign in before deleting transactions.");
+      }
+
+      const { error } = await supabase
+        .from("transactions")
+        .delete()
+        .eq("id", transactionId);
+
+      if (error) {
+        console.error("Delete transaction error:", error);
+        throw new Error(error.message || "Failed to delete transaction");
+      }
+    },
+    onError: (error) => {
+      const errorMessage = error instanceof Error ? error.message : "Failed to delete transaction.";
+      console.error("Delete error:", errorMessage);
+      toast.error(errorMessage);
+    },
+    onSuccess: async () => {
+      toast.success("Transaction deleted.");
+      await refreshWorkspaceData();
+    },
+  });
+
   const importIncomingMutation = useMutation({
     mutationFn: async (rows: IncomingImportRow[]) => {
       if (!user) {
@@ -1407,7 +1449,7 @@ export default function Transactions() {
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    await addTransactionMutation.mutateAsync(form);
+    setPendingAddTransactionForm(form);
   };
 
   const hasLoadError = Boolean(productsError || transactionsError);
@@ -2020,16 +2062,17 @@ export default function Transactions() {
               <Table>
                 <TableHeader>
                   <TableRow className="border-b border-[#ddd6cb] hover:bg-transparent">
-                    <TableHead className="pl-0 text-[#5f5a56]">Products</TableHead>
+                    <TableHead className="text-[#5f5a56]">Products</TableHead>
                     <TableHead className="text-[#5f5a56]">Quantity Added</TableHead>
                     <TableHead className="text-[#5f5a56]">Total Stock</TableHead>
-                    <TableHead className="pr-0 text-[#5f5a56]">Time Scanned</TableHead>
+                    <TableHead className="text-[#5f5a56]">Time Scanned</TableHead>
+                    <TableHead className="pr-0 text-[#5f5a56]">Action</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filteredTransactions.length === 0 ? (
                     <TableRow className="border-white/0">
-                      <TableCell colSpan={4} className="px-0 py-12 text-center text-[#686868]">
+                      <TableCell colSpan={5} className="px-0 py-12 text-center text-[#686868]">
                         No transactions found yet.
                       </TableCell>
                     </TableRow>
@@ -2086,8 +2129,23 @@ export default function Transactions() {
                               </p>
                             </div>
                           </TableCell>
-                          <TableCell className="pr-0 text-sm text-[#171717]">
+                          <TableCell className="text-[#171717]">
                             {new Date(transaction.created_at).toLocaleString()}
+                          </TableCell>
+                          <TableCell className="pr-0 text-sm">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setPendingDeleteTransactionId(transaction.id)}
+                              disabled={deleteTransactionMutation.isPending}
+                              className="text-[#cf5a5a] hover:bg-[#ffe1e1] hover:text-[#b34d4d]"
+                            >
+                              {deleteTransactionMutation.isPending ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-4 w-4" />
+                              )}
+                            </Button>
                           </TableCell>
                         </TableRow>
                       );
@@ -2099,6 +2157,79 @@ export default function Transactions() {
           )}
         </section>
       </div>
+
+      {/* Delete Transaction Confirmation Dialog */}
+      <AlertDialog open={Boolean(pendingDeleteTransactionId)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Transaction?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this transaction? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setPendingDeleteTransactionId(null)}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (pendingDeleteTransactionId) {
+                  deleteTransactionMutation.mutate(pendingDeleteTransactionId);
+                  setPendingDeleteTransactionId(null);
+                }
+              }}
+              disabled={deleteTransactionMutation.isPending}
+            >
+              {deleteTransactionMutation.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting
+                </>
+              ) : (
+                "Delete"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Add Transaction Confirmation Dialog */}
+      <AlertDialog open={Boolean(pendingAddTransactionForm)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Transaction</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingAddTransactionForm?.type === "incoming"
+                ? "Add this incoming transaction to your inventory?"
+                : "Record this sale transaction?"}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setPendingAddTransactionForm(null)}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (pendingAddTransactionForm) {
+                  addTransactionMutation.mutate(pendingAddTransactionForm);
+                  setPendingAddTransactionForm(null);
+                  setForm(defaultForm);
+                }
+              }}
+              disabled={addTransactionMutation.isPending}
+            >
+              {addTransactionMutation.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Confirming
+                </>
+              ) : (
+                "Confirm"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </DashboardLayout>
   );
 }

@@ -221,6 +221,7 @@ export default function Inventory() {
   const [isSeeding, setIsSeeding] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
   const [productPendingDelete, setProductPendingDelete] = useState<Product | null>(null);
+  const [productGroupPendingDelete, setProductGroupPendingDelete] = useState<ProductGroup | null>(null);
 
   const { user } = useAuthContext();
   const queryClient = useQueryClient();
@@ -613,6 +614,54 @@ export default function Inventory() {
     },
   });
 
+  const deleteProductGroupMutation = useMutation({
+    mutationFn: async (group: ProductGroup) => {
+      if (!user) {
+        throw new Error("You must be signed in to delete inventory.");
+      }
+
+      // Detach transactions from all products in the group
+      const { error: detachTransactionsError } = await supabase
+        .from("transactions")
+        .update({ product_id: null })
+        .in(
+          "product_id",
+          group.products.map((p) => p.id),
+        )
+        .eq("user_id", user.id);
+
+      if (detachTransactionsError && !isMissingTransactionsTableError(detachTransactionsError)) {
+        throw detachTransactionsError;
+      }
+
+      // Delete all products in the group
+      const { error: deleteError } = await supabase
+        .from("products")
+        .delete()
+        .in(
+          "id",
+          group.products.map((p) => p.id),
+        )
+        .eq("user_id", user.id);
+
+      if (deleteError) {
+        throw deleteError;
+      }
+
+      return group;
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to delete product batch.");
+    },
+    onSuccess: (deletedGroup) => {
+      setProductGroupPendingDelete(null);
+      const message = `Deleted all ${deletedGroup.batchCount} batch(es) of ${deletedGroup.name}. Linked transactions were kept.`;
+      toast.success(message);
+      queryClient.invalidateQueries({ queryKey: ["products", user?.id] });
+      queryClient.invalidateQueries({ queryKey: ["transactions", user?.id] });
+    },
+  });
+
   const unitPriceByName = useMemo(() => buildUnitPriceByName(transactions), [transactions]);
   const totalUnits = useMemo(
     () => groupedProducts.reduce((sum, group) => sum + group.totalQuantity, 0),
@@ -873,22 +922,35 @@ export default function Inventory() {
                             </div>
                           </TableCell>
                           <TableCell className="text-right">
-                            <Button
-                              type="button"
-                              size="sm"
-                              onClick={() => handleSaveGroupQuantity(group)}
-                              disabled={!hasUnsavedQuantityChange || saveGroupQuantityMutation.isPending}
-                              className="h-8 rounded-[4px] bg-[#6b95df] px-3 text-xs font-medium text-white hover:bg-[#5f88d1]"
-                            >
-                              {isSavingGroup ? (
-                                <>
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                  Saving
-                                </>
-                              ) : (
-                                "Save Changes"
-                              )}
-                            </Button>
+                            <div className="flex items-center justify-end gap-2">
+                              <Button
+                                type="button"
+                                size="sm"
+                                onClick={() => handleSaveGroupQuantity(group)}
+                                disabled={!hasUnsavedQuantityChange || saveGroupQuantityMutation.isPending}
+                                className="h-8 rounded-[4px] bg-[#6b95df] px-3 text-xs font-medium text-white hover:bg-[#5f88d1]"
+                              >
+                                {isSavingGroup ? (
+                                  <>
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    Saving
+                                  </>
+                                ) : (
+                                  "Save Changes"
+                                )}
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setProductGroupPendingDelete(group)}
+                                disabled={deleteProductGroupMutation.isPending}
+                                className="h-8 text-[#b34d4d] hover:bg-white/50 hover:text-[#b34d4d]"
+                              >
+                                <Trash2 className="mr-2 h-4 w-4" />
+                                Delete
+                              </Button>
+                            </div>
                           </TableCell>
                         </TableRow>
                         {hasMultipleBatches && isExpanded ? (
@@ -1032,6 +1094,50 @@ export default function Inventory() {
               }}
             >
               {deleteExpiredProductMutation.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                "Delete batch"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete Product Group Confirmation Dialog */}
+      <AlertDialog open={Boolean(productGroupPendingDelete)}>
+        <AlertDialogContent className="text-white">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-white">Delete Product Batch?</AlertDialogTitle>
+            <AlertDialogDescription className="text-white/90">
+              {productGroupPendingDelete
+                ? `This will permanently remove all ${productGroupPendingDelete.batchCount} batch(es) of ${productGroupPendingDelete.name} from inventory. Linked transactions will be kept, but detached from this product record.`
+                : ""}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              disabled={deleteProductGroupMutation.isPending}
+              onClick={() => setProductGroupPendingDelete(null)}
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-[#cf5a5a] text-white hover:bg-[#c55252]"
+              disabled={!productGroupPendingDelete || deleteProductGroupMutation.isPending}
+              onClick={(event) => {
+                event.preventDefault();
+
+                if (!productGroupPendingDelete) {
+                  return;
+                }
+
+                deleteProductGroupMutation.mutate(productGroupPendingDelete);
+              }}
+            >
+              {deleteProductGroupMutation.isPending ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
                   Deleting...
