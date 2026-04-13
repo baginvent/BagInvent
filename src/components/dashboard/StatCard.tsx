@@ -17,14 +17,14 @@ interface StatCardProps {
 const badgeStyles = {
   default: "bg-[#d7f6e3] text-[#2f7b54]",
   warning: "bg-[#fff2ab] text-[#8a6b08]",
-  danger: "bg-[#ffd9d9] text-[#b34d4d]",
+  danger: "bg-[#ffd9d9] text-primary",
   success: "bg-[#d7f6e3] text-[#2f7b54]",
 };
 
 const iconStyles = {
   default: "bg-white/70 text-[#717171]",
   warning: "bg-white/70 text-[#8a6b08]",
-  danger: "bg-white/70 text-[#b34d4d]",
+  danger: "bg-white/70 text-primary",
   success: "bg-white/70 text-[#2f7b54]",
 };
 

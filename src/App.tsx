@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { ThemeManager } from "@/hooks/useUserTheme";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { ConfigurationError } from "@/components/ConfigurationError";
 import { isSupabaseConfigured } from "@/integrations/supabase/client";
@@ -29,6 +30,7 @@ const App = () => {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
+        <ThemeManager />
         <TooltipProvider>
           <Toaster />
           <Sonner />

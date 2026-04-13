@@ -19,7 +19,7 @@ export default function Auth() {
   });
 
   const inputClassName =
-    "h-11 rounded-none border-0 bg-[#e4e4e4] text-[#171717] shadow-none focus-visible:ring-1 focus-visible:ring-[#cf5a5a] focus-visible:ring-offset-0";
+    "h-11 rounded-none border-0 bg-[#e4e4e4] text-[#171717] shadow-none focus-visible:ring-1 focus-visible:ring-primary focus-visible:ring-offset-0";
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -97,7 +97,7 @@ export default function Auth() {
           <Button
             type="submit"
             disabled={isLoading}
-            className="h-11 w-full rounded-none bg-[#cf5a5a] font-medium text-white hover:bg-[#c55252]"
+            className="h-11 w-full rounded-none bg-primary font-medium text-white hover:bg-primary/90"
           >
             {isLoading ? "Signing in..." : "Log in"}
           </Button>

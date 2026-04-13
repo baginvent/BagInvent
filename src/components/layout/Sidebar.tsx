@@ -8,6 +8,7 @@ import {
   Receipt,
 } from "lucide-react";
 import { useAuthContext } from "@/contexts/AuthContext";
+import { useUserTheme } from "@/hooks/useUserTheme";
 import { BrandMark } from "@/components/BrandMark";
 import { cn } from "@/lib/utils";
  
@@ -22,6 +23,7 @@ import { cn } from "@/lib/utils";
 export function Sidebar() {
   const location = useLocation();
   const { profile, signOut } = useAuthContext();
+  const { themeId, themes, setUserTheme } = useUserTheme();
 
   const companyName = profile?.company_name || "Your Company";
   const nameParts = companyName.split(" ");
@@ -34,7 +36,7 @@ export function Sidebar() {
         ];
 
   return (
-    <aside className="flex min-h-screen flex-col bg-[#231f20] text-white">
+    <aside className="flex min-h-screen flex-col bg-sidebar text-sidebar-foreground">
       <div className="px-4 pb-6 pt-4">
         <div className="flex items-center gap-3">
           <BrandMark className="h-14 w-14" tone="light" />
@@ -42,12 +44,12 @@ export function Sidebar() {
             {lines.map((line) => (
               <p
                 key={line}
-                className="text-sm font-semibold uppercase leading-tight tracking-[0.14em] text-[#f6f3ee]"
+                className="text-sm font-semibold uppercase leading-tight tracking-[0.14em] text-sidebar-foreground"
               >
                 {line}
               </p>
             ))}
-            <p className="text-[10px] uppercase tracking-[0.28em] text-[#ce5a5a]">
+            <p className="text-[10px] uppercase tracking-[0.28em] text-sidebar-accent">
               Inventory System
             </p>
           </div>
@@ -66,9 +68,10 @@ export function Sidebar() {
               className={cn(
                 "flex items-center gap-3 px-5 py-3 text-[11px] font-medium transition-colors",
                 isActive
-                  ? "bg-[#ce5a5a] text-white"
-                  : "text-[#f2ece4] hover:bg-white/5",
+                  ? "text-sidebar-primary-foreground"
+                  : "text-sidebar-foreground hover:bg-white/5",
               )}
+              style={isActive ? { backgroundColor: "hsl(var(--sidebar-primary))" } : undefined}
             >
               <Icon className="h-3.5 w-3.5 shrink-0" />
               <span>{item.name}</span>
@@ -77,10 +80,36 @@ export function Sidebar() {
         })}
       </nav>
 
-      <div className="fixed bottom-0 left-0 md:w-[220px] border-t border-white/10 bg-[#231f20] p-3">
+      <div className="fixed bottom-0 left-0 md:w-[220px] border-t border-sidebar-border bg-sidebar p-3">
+        <div className="mb-3">
+          <p className="text-[10px] uppercase tracking-[0.28em] text-white">
+            Theme
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {themes.map((theme) => (
+              <button
+                key={theme.id}
+                type="button"
+                onClick={() => setUserTheme(theme.id)}
+                className={cn(
+                  "inline-flex items-center justify-center rounded-full px-3 py-1 text-[10px] font-semibold transition-all",
+                  themeId === theme.id
+                    ? "ring-2 ring-white text-white"
+                    : "opacity-80 hover:opacity-100",
+                )}
+                style={{
+                  backgroundColor: `hsl(${theme.primary})`,
+                  color: `hsl(${theme.primaryForeground})`,
+                }}
+              >
+                {theme.label}
+              </button>
+            ))}
+          </div>
+        </div>
         <button
           onClick={signOut}
-          className="flex w-full items-center gap-3 px-4 py-2.5 text-[11px] font-medium text-[#f2ece4] transition-colors hover:bg-white/5"
+          className="flex w-full items-center gap-3 px-4 py-2.5 text-[11px] font-medium text-sidebar-foreground transition-colors hover:bg-white/5"
         >
           <LogOut className="h-3.5 w-3.5" />
           <span>Log out</span>

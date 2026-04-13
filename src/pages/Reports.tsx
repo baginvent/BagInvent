@@ -419,10 +419,10 @@ export default function Reports() {
       totalUnits === 0 ? 0 : Math.round((value / totalUnits) * 100);
 
     return [
-      { color: "#cf5a5a", name: "Critical (0-7 days)", units: totals.critical, value: toPercent(totals.critical) },
-      { color: "#f0d66d", name: "Attention (8-30 days)", units: totals.attention, value: toPercent(totals.attention) },
-      { color: "#5aa36c", name: "Healthy (31+ days)", units: totals.healthy, value: toPercent(totals.healthy) },
-      { color: "#2d63c8", name: "No Expiry", units: totals.noExpiry, value: toPercent(totals.noExpiry) },
+      { color: "var(--destructive)", name: "Critical (0-7 days)", units: totals.critical, value: toPercent(totals.critical) },
+      { color: "var(--warning)", name: "Attention (8-30 days)", units: totals.attention, value: toPercent(totals.attention) },
+      { color: "var(--success)", name: "Healthy (31+ days)", units: totals.healthy, value: toPercent(totals.healthy) },
+      { color: "var(--primary)", name: "No Expiry", units: totals.noExpiry, value: toPercent(totals.noExpiry) },
     ].filter((item) => item.units > 0);
   }, [filteredProducts]);
 
@@ -506,7 +506,7 @@ export default function Reports() {
                 type="button"
                 onClick={handleExportPDF}
                 disabled={isLoading || hasLoadError}
-                className="h-10 rounded-[4px] bg-[#d8d8d8] px-4 text-sm font-medium text-[#171717] hover:bg-[#cccccc]"
+                className="h-10 rounded-[4px] bg-muted px-4 text-sm font-medium text-muted-foreground hover:bg-muted/90"
               >
                 <Download className="h-4 w-4" />
                 Export PDF
@@ -520,8 +520,8 @@ export default function Reports() {
                     onClick={() => setDateFilterType(option.value)}
                     className={
                       dateFilterType === option.value
-                        ? "rounded-[4px] border border-[#cf5a5a] bg-[#f6dede] px-3 py-2 text-xs font-medium text-[#171717]"
-                        : "rounded-[4px] border border-[#dfd8cf] bg-[#efebe6] px-3 py-2 text-xs font-medium text-[#171717] hover:bg-[#e7e1d8]"
+                        ? "rounded-[4px] border border-primary bg-primary/10 px-3 py-2 text-xs font-medium text-foreground"
+                        : "rounded-[4px] border border-border bg-popover px-3 py-2 text-xs font-medium text-foreground hover:bg-popover/90"
                     }
                   >
                     {option.label}
@@ -538,21 +538,21 @@ export default function Reports() {
                 type="date"
                 value={customFromDate}
                 onChange={(event) => setCustomFromDate(event.target.value)}
-                className="h-10 rounded-[4px] border-[#dfd8cf] bg-[#efebe6] text-sm text-[#171717] focus-visible:ring-1 focus-visible:ring-[#cf5a5a] focus-visible:ring-offset-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-70"
+                className="h-10 rounded-[4px] border-border bg-popover text-sm text-foreground focus-visible:ring-1 focus-visible:ring-primary focus-visible:ring-offset-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-70"
               />
               <Input
                 aria-label="Custom report end date"
                 type="date"
                 value={customToDate}
                 onChange={(event) => setCustomToDate(event.target.value)}
-                className="h-10 rounded-[4px] border-[#dfd8cf] bg-[#efebe6] text-sm text-[#171717] focus-visible:ring-1 focus-visible:ring-[#cf5a5a] focus-visible:ring-offset-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-70"
+                className="h-10 rounded-[4px] border-border bg-popover text-sm text-foreground focus-visible:ring-1 focus-visible:ring-primary focus-visible:ring-offset-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-70"
               />
             </div>
           ) : null}
         </div>
 
         {hasLoadError ? (
-          <div className="workspace-card-soft text-sm text-[#b34d4d]">
+          <div className="workspace-card-soft text-sm text-primary">
             Report data could not be loaded. Refresh after your inventory and transactions tables
             are available.
           </div>
@@ -582,16 +582,16 @@ export default function Reports() {
                     <YAxis stroke="#3a3a3a" fontSize={11} tickLine={false} />
                     <Tooltip
                       contentStyle={{
-                        backgroundColor: "#f7f4ef",
-                        border: "1px solid #d8cfc4",
+                        backgroundColor: "var(--popover)",
+                        border: "1px solid var(--border)",
                         borderRadius: "4px",
-                        color: "#171717",
+                        color: "var(--foreground)",
                       }}
                       formatter={(value: number) => [formatCurrency(value), "Sales"]}
                     />
                     <Bar dataKey="sales">
                       {salesData.map((_, index) => (
-                        <Cell key={index} fill={index === salesData.length - 1 ? "#cf5a5a" : "#2d63c8"} />
+                          <Cell key={index} fill={index === salesData.length - 1 ? "var(--destructive)" : "var(--primary)"} />
                       ))}
                     </Bar>
                   </BarChart>
@@ -621,15 +621,15 @@ export default function Reports() {
                     <YAxis stroke="#3a3a3a" fontSize={11} tickLine={false} />
                     <Tooltip
                       contentStyle={{
-                        backgroundColor: "#f7f4ef",
-                        border: "1px solid #d8cfc4",
+                        backgroundColor: "var(--popover)",
+                        border: "1px solid var(--border)",
                         borderRadius: "4px",
-                        color: "#171717",
+                        color: "var(--foreground)",
                       }}
                       formatter={(value: number) => [`${value} units`, "Movement"]}
                     />
-                    <Line type="monotone" dataKey="incoming" stroke="#5aa36c" strokeWidth={2.2} dot={false} />
-                    <Line type="monotone" dataKey="outgoing" stroke="#5642a5" strokeWidth={2.2} dot={false} />
+                    <Line type="monotone" dataKey="incoming" stroke="var(--success)" strokeWidth={2.2} dot={false} />
+                    <Line type="monotone" dataKey="outgoing" stroke="var(--primary)" strokeWidth={2.2} dot={false} />
                   </LineChart>
                 </ResponsiveContainer>
               )}
@@ -668,10 +668,10 @@ export default function Reports() {
                       </Pie>
                       <Tooltip
                         contentStyle={{
-                          backgroundColor: "#f7f4ef",
-                          border: "1px solid #d8cfc4",
+                          backgroundColor: "var(--popover)",
+                          border: "1px solid var(--border)",
                           borderRadius: "4px",
-                          color: "#171717",
+                          color: "var(--foreground)",
                         }}
                         formatter={(value: number, _name, item) => [
                           `${value}%`,
@@ -683,9 +683,9 @@ export default function Reports() {
                 </div>
                 <div className="w-full space-y-3">
                   {stockAging.map((item) => (
-                    <div key={item.name} className="flex items-center gap-3 rounded-[4px] bg-[#efebe6] px-4 py-3">
+                    <div key={item.name} className="flex items-center gap-3 rounded-[4px] bg-popover px-4 py-3">
                       <div className="h-4 w-4 rounded" style={{ backgroundColor: item.color }} />
-                      <span className="text-sm text-[#171717]">{item.name}</span>
+                      <span className="text-sm text-foreground">{item.name}</span>
                       <span className="ml-auto text-sm text-[#555]">
                         {item.value}% ({item.units} units)
                       </span>

@@ -333,7 +333,7 @@ export function TopSellingChart() {
                 className={cn(
                   "rounded-[4px] border px-3 py-2 text-xs font-medium transition-colors",
                   dateFilterType === option.value
-                    ? "border-[#cf5a5a] bg-[#f6dede] text-[#171717]"
+                    ? "border-primary bg-primary/10 text-[#171717]"
                     : "border-[#dfd8cf] bg-[#efebe6] text-[#171717] hover:bg-[#e7e1d8]",
                 )}
               >
@@ -350,14 +350,14 @@ export function TopSellingChart() {
               type="date"
               value={customFromDate}
               onChange={(event) => handleCustomFromDateChange(event.target.value)}
-              className="h-9 rounded-[4px] border-[#dfd8cf] bg-[#efebe6] text-xs text-[#171717] focus-visible:ring-[#cf5a5a] focus-visible:ring-offset-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-70"
+              className="h-9 rounded-[4px] border-[#dfd8cf] bg-[#efebe6] text-xs text-[#171717] focus-visible:ring-primary focus-visible:ring-offset-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-70"
             />
             <Input
               aria-label="Custom range end date"
               type="date"
               value={customToDate}
               onChange={(event) => handleCustomToDateChange(event.target.value)}
-              className="h-9 rounded-[4px] border-[#dfd8cf] bg-[#efebe6] text-xs text-[#171717] focus-visible:ring-[#cf5a5a] focus-visible:ring-offset-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-70"
+              className="h-9 rounded-[4px] border-[#dfd8cf] bg-[#efebe6] text-xs text-[#171717] focus-visible:ring-primary focus-visible:ring-offset-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-70"
             />
           </div>
         ) : null}

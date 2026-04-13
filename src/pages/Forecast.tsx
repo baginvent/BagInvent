@@ -53,18 +53,18 @@ const EMPTY_TRANSACTIONS: Transaction[] = [];
 const demandLevelStyles = {
   "High demand": "bg-[#d7f6e3] text-[#2f7b54]",
   "Medium demand": "bg-[#fff2ab] text-[#8a6b08]",
-  "Low demand": "bg-[#ffd9d9] text-[#b34d4d]",
+  "Low demand": "bg-[#ffd9d9] text-primary",
 } as const;
 
 const stockDecisionStyles = {
   "Increase stock": "bg-[#d7f6e3] text-[#2f7b54]",
   "Maintain stock": "bg-[#fff2ab] text-[#8a6b08]",
-  "Reduce stock": "bg-[#ffd9d9] text-[#b34d4d]",
+  "Reduce stock": "bg-[#ffd9d9] text-primary",
 } as const;
 
 const confidenceStyles: Record<ForecastConfidence, string> = {
   high: "bg-[#d7f6e3] text-[#2f7b54]",
-  low: "bg-[#ffd9d9] text-[#b34d4d]",
+  low: "bg-[#ffd9d9] text-primary",
   medium: "bg-[#fff2ab] text-[#8a6b08]",
 };
 
@@ -363,7 +363,7 @@ export default function Forecast() {
               Export PDF
             </Button>
             <Button
-              className="h-10 rounded-[4px] bg-[#cf5a5a] px-5 text-white hover:bg-[#c55252]"
+              className="h-10 rounded-[4px] bg-primary px-5 text-white hover:bg-primary/90"
               onClick={() => setForecastVersion((currentValue) => currentValue + 1)}
               disabled={isLoading || hasLoadError}
             >
@@ -374,7 +374,7 @@ export default function Forecast() {
         </div>
 
         {hasLoadError ? (
-          <div className="workspace-card-soft text-sm text-[#b34d4d]">
+          <div className="workspace-card-soft text-sm text-primary">
             Forecast data could not be loaded. Refresh after your inventory and transactions
             tables are available.
           </div>
@@ -416,7 +416,7 @@ export default function Forecast() {
                         className={`flex h-10 w-10 items-center justify-center rounded-full ${
                           salesTrends.growth >= 0
                             ? "bg-[#d7f6e3] text-[#2f7b54]"
-                            : "bg-[#ffd9d9] text-[#b34d4d]"
+                            : "bg-[#ffd9d9] text-primary"
                         }`}
                       >
                         <GrowthIcon className="h-5 w-5" />
@@ -499,7 +499,7 @@ export default function Forecast() {
                       onClick={() => setSelectedCategory(category)}
                       className={
                         selectedCategory === category
-                          ? "rounded-full bg-[#cf5a5a] px-4 py-1.5 text-xs font-medium text-white"
+                          ? "rounded-full bg-primary px-4 py-1.5 text-xs font-medium text-white"
                           : "rounded-full bg-[#efebe6] px-4 py-1.5 text-xs font-medium text-[#171717]"
                       }
                     >
@@ -735,7 +735,7 @@ export default function Forecast() {
                               {summarizeForecastText(item.reason, 16)}
                             </p>
                           </div>
-                          <span className="rounded-full bg-[#ffd9d9] px-3 py-1 text-xs font-medium text-[#b34d4d]">
+                          <span className="rounded-full bg-[#ffd9d9] px-3 py-1 text-xs font-medium text-primary">
                             Buy Less
                           </span>
                         </div>

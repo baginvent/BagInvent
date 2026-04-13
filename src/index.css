@@ -78,35 +78,35 @@
 
 @layer utilities {
   .stat-card {
-    @apply rounded-[4px] bg-[#d9d9d9] p-4 text-[#171717] shadow-sm;
+    @apply rounded-[4px] bg-card text-card-foreground p-4 shadow-sm;
   }
 
   .chart-container {
-    @apply rounded-[4px] bg-[#d9d9d9] p-5 text-[#171717] shadow-sm;
+    @apply rounded-[4px] bg-card text-card-foreground p-5 shadow-sm;
   }
 
   .insight-card {
-    @apply rounded-[4px] bg-[#ece9e5] p-4 text-[#171717];
+    @apply rounded-[4px] bg-muted text-muted-foreground p-4;
   }
 
   .workspace-panel {
-    @apply rounded-[4px] bg-[#d9d9d9] p-5 text-[#171717] shadow-sm;
+    @apply rounded-[4px] bg-card text-card-foreground p-5 shadow-sm;
   }
 
   .workspace-card {
-    @apply rounded-[4px] bg-[#d9d9d9] p-4 text-[#171717] shadow-sm;
+    @apply rounded-[4px] bg-card text-card-foreground p-4 shadow-sm;
   }
 
   .workspace-card-soft {
-    @apply rounded-[4px] bg-[#ece9e5] p-4 text-[#171717] shadow-sm;
+    @apply rounded-[4px] bg-popover text-foreground p-4 shadow-sm;
   }
 
   .workspace-table {
-    @apply overflow-hidden rounded-[4px] bg-[#d9d9d9] p-3 shadow-sm;
+    @apply overflow-hidden rounded-[4px] bg-card p-3 shadow-sm;
   }
 
   .workspace-action {
-    @apply inline-flex items-center justify-center rounded-full bg-[#d8d8d8] px-5 py-2 text-xs font-medium text-[#171717] transition-colors hover:bg-[#cfcfcf];
+    @apply inline-flex items-center justify-center rounded-full bg-muted px-5 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/90;
   }
 
   .soft-badge {
@@ -114,15 +114,15 @@
   }
 
   .status-low {
-    @apply rounded-full bg-[#ffd9d9] px-2 py-0.5 text-xs font-medium text-[#b34d4d];
+    @apply rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive;
   }
 
   .status-normal {
-    @apply rounded-full bg-[#d7f6e3] px-2 py-0.5 text-xs font-medium text-[#2f7b54];
+    @apply rounded-full bg-success/10 px-2 py-0.5 text-xs font-medium text-success;
   }
 
   .status-warning {
-    @apply rounded-full bg-[#fff2ab] px-2 py-0.5 text-xs font-medium text-[#8a6b08];
+    @apply rounded-full bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning;
   }
 
   .product-thumb {

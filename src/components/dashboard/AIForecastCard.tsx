@@ -81,7 +81,7 @@ export function AIForecastCard({ products, transactions }: AIForecastCardProps) 
                 onClick={() => setSelectedCategory(category)}
                 className={
                   selectedCategory === category
-                    ? "rounded-full bg-[#cf5a5a] px-4 py-1.5 text-xs font-medium text-white"
+                    ? "rounded-full bg-primary px-4 py-1.5 text-xs font-medium text-white"
                     : "rounded-full bg-[#efebe6] px-4 py-1.5 text-xs font-medium text-[#171717]"
                 }
               >
@@ -143,7 +143,7 @@ export function AIForecastCard({ products, transactions }: AIForecastCardProps) 
         ) : (
           <div className="mt-10 space-y-2 text-center">
             <p className="text-[15px] text-[#232323]">30-day forecast will appear here</p>
-            <p className="text-sm text-[#cf5a5a]">
+            <p className="text-sm text-primary">
               Add more sales history to unlock the full demand graph.
             </p>
           </div>

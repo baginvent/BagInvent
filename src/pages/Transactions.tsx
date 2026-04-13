@@ -1459,7 +1459,7 @@ export default function Transactions() {
   const panelClassName =
     "rounded-[4px] bg-[#fbfaf7] p-6 text-[#171717] shadow-[0_12px_32px_rgba(34,28,24,0.08)] ring-1 ring-[#ddd6cb]";
   const fieldClassName =
-    "h-11 rounded-[4px] border-0 bg-[#d8d8d8] text-[#171717] placeholder:text-[#787878] focus-visible:ring-1 focus-visible:ring-[#cf5a5a]";
+    "h-11 rounded-[4px] border-0 bg-[#d8d8d8] text-[#171717] placeholder:text-[#787878] focus-visible:ring-1 focus-visible:ring-primary";
   const pageTitle = form.type === "incoming" ? "Add Product" : "Record Sale";
   const pageDescription = "";
   const importPreviewRows = pendingIncomingImport?.rows.slice(0, 3) ?? [];
@@ -1472,7 +1472,7 @@ export default function Transactions() {
     <DashboardLayout pageLabel="Transactions">
       <div className="space-y-8">
         {hasLoadError ? (
-          <div className="workspace-card-soft text-sm text-[#b34d4d]">
+          <div className="workspace-card-soft text-sm text-primary">
             Transactions data could not be loaded. Apply the latest Supabase migration, then
             refresh the app.
           </div>
@@ -1497,7 +1497,7 @@ export default function Transactions() {
                   onClick={() => handleTypeChange("incoming")}
                   className={
                     form.type === "incoming"
-                      ? "rounded-[4px] bg-[#cf5a5a] px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-white"
+                      ? "rounded-[4px] bg-primary px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-white"
                       : "rounded-[4px] px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#171717]"
                   }
                 >
@@ -1508,7 +1508,7 @@ export default function Transactions() {
                   onClick={() => handleTypeChange("sale")}
                   className={
                     form.type === "sale"
-                      ? "rounded-[4px] bg-[#cf5a5a] px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-white"
+                      ? "rounded-[4px] bg-primary px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-white"
                       : "rounded-[4px] px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#171717]"
                   }
                 >
@@ -1567,7 +1567,7 @@ export default function Transactions() {
                         type="button"
                         onClick={() => importIncomingMutation.mutate(pendingIncomingImport.rows)}
                         disabled={importIncomingMutation.isPending || hasLoadError}
-                        className="h-10 rounded-[4px] bg-[#cf5a5a] px-5 text-white hover:bg-[#bb4f4f]"
+                        className="h-10 rounded-[4px] bg-primary px-5 text-white hover:bg-primary/80"
                       >
                         {importIncomingMutation.isPending ? (
                           <>
@@ -1788,7 +1788,7 @@ export default function Transactions() {
                               className={
                                 normalizeProductText(form.category) ===
                                 normalizeProductText(categoryOption)
-                                  ? "rounded-full bg-[#cf5a5a] px-3 py-1 text-xs font-medium text-white"
+                                  ? "rounded-full bg-primary px-3 py-1 text-xs font-medium text-white"
                                   : "rounded-full bg-[#efebe6] px-3 py-1 text-xs font-medium text-[#171717]"
                               }
                             >
@@ -1918,7 +1918,7 @@ export default function Transactions() {
                         className={cn(
                           "flex items-center justify-center gap-2 rounded-[4px] border px-3 py-2.5 text-sm font-medium transition-colors",
                           dateFilterType === option
-                            ? "border-[#cf5a5a] bg-[#f6dede] text-[#171717]"
+                            ? "border-primary bg-primary/10 text-[#171717]"
                             : "border-[#dfd8cf] bg-[#efebe6] text-[#171717] hover:bg-[#e7e1d8]",
                         )}
                       >
@@ -1994,7 +1994,7 @@ export default function Transactions() {
                     className={cn(
                       "flex w-full items-start gap-3 rounded-[4px] border px-3 py-3 text-left transition-colors",
                       exportFormat === option.value
-                        ? "border-[#cf5a5a] bg-[#f6dede]"
+                        ? "border-primary bg-primary/10"
                         : "border-[#dfd8cf] bg-[#efebe6] hover:bg-[#e7e1d8]",
                     )}
                   >
@@ -2002,7 +2002,7 @@ export default function Transactions() {
                       className={cn(
                         "mt-1 h-3 w-3 rounded-full border",
                         exportFormat === option.value
-                          ? "border-[#cf5a5a] bg-[#cf5a5a]"
+                          ? "border-primary bg-primary"
                           : "border-[#9f948c] bg-transparent",
                       )}
                     />
@@ -2047,7 +2047,7 @@ export default function Transactions() {
                   onClick={() => setTypeFilter(option)}
                   className={
                     typeFilter === option
-                      ? "rounded-full bg-[#cf5a5a] px-4 py-1.5 text-xs font-medium text-white"
+                      ? "rounded-full bg-primary px-4 py-1.5 text-xs font-medium text-white"
                       : "rounded-full bg-[#efebe6] px-4 py-1.5 text-xs font-medium text-[#171717]"
                   }
                 >
@@ -2104,7 +2104,7 @@ export default function Transactions() {
                             <div className="space-y-1">
                               <div className="flex items-center gap-2 font-medium">
                                 {transaction.type === "sale" ? (
-                                  <ArrowUpRight className="h-4 w-4 text-[#cf5a5a]" />
+                                  <ArrowUpRight className="h-4 w-4 text-primary" />
                                 ) : (
                                   <ArrowDownLeft className="h-4 w-4 text-[#2d63c8]" />
                                 )}
@@ -2117,7 +2117,7 @@ export default function Transactions() {
                                 className={cn(
                                   "inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em]",
                                   transaction.type === "sale"
-                                    ? "bg-[#ffe1e1] text-[#b34d4d]"
+                                    ? "bg-primary/10 text-primary"
                                     : "bg-[#d7f6e3] text-[#2f7b54]",
                                 )}
                               >
@@ -2142,7 +2142,7 @@ export default function Transactions() {
                               size="sm"
                               onClick={() => setPendingDeleteTransactionId(transaction.id)}
                               disabled={deleteTransactionMutation.isPending}
-                              className="text-[#cf5a5a] hover:bg-[#ffe1e1] hover:text-[#b34d4d]"
+                              className="text-primary hover:bg-primary/10 hover:text-primary"
                             >
                               {deleteTransactionMutation.isPending ? (
                                 <Loader2 className="h-4 w-4 animate-spin" />

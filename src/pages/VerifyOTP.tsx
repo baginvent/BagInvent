@@ -210,7 +210,7 @@ export default function VerifyOTP() {
         <Button
           onClick={handleVerify}
           disabled={isVerifying || isSendingCode || code.length !== EMAIL_OTP_LENGTH}
-          className="h-11 w-full rounded-none bg-[#cf5a5a] font-medium text-white hover:bg-[#c55252]"
+          className="h-11 w-full rounded-none bg-primary font-medium text-white hover:bg-primary/90"
         >
           {isVerifying ? "Verifying..." : "Verify Account"}
         </Button>
