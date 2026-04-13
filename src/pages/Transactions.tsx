@@ -48,6 +48,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+
 import {
   Table,
   TableBody,
@@ -1110,13 +1111,14 @@ export default function Transactions() {
   const transactions = transactionResult?.items ?? EMPTY_TRANSACTIONS;
   const usingMockTransactions = transactionResult?.source === "mock";
   const productOptions = useMemo(() => buildSaleProductOptions(products), [products]);
-  const categoryOptions = useMemo(
-    () =>
-      Array.from(
-        new Set(products.map((product) => product.category.trim()).filter(Boolean)),
-      ).sort((left, right) => left.localeCompare(right)),
-    [products],
-  );
+  const categoryOptions = useMemo(() => {
+    const existingCategories = Array.from(
+      new Set(products.map((product) => product.category.trim()).filter(Boolean)),
+    ).sort((left, right) => left.localeCompare(right));
+    
+    return existingCategories;
+  }, [products]);
+
   const inventoryTotalsByName = useMemo(() => {
     const totals = new Map<string, number>();
 
@@ -1772,26 +1774,28 @@ export default function Transactions() {
                       value={form.category}
                       onChange={(event) => setForm({ ...form, category: event.target.value })}
                       className={fieldClassName}
-                      placeholder="Category"
+                      placeholder="Start typing category..."
                       required
                     />
                     {categoryOptions.length > 0 ? (
-                      <div className="flex flex-wrap gap-2 pt-2">
-                        {categoryOptions.slice(0, 6).map((categoryOption) => (
-                          <button
-                            key={categoryOption}
-                            type="button"
-                            onClick={() => setForm({ ...form, category: categoryOption })}
-                            className={
-                              normalizeProductText(form.category) ===
-                              normalizeProductText(categoryOption)
-                                ? "rounded-full bg-[#cf5a5a] px-3 py-1 text-xs font-medium text-white"
-                                : "rounded-full bg-[#efebe6] px-3 py-1 text-xs font-medium text-[#171717]"
-                            }
-                          >
-                            {categoryOption}
-                          </button>
-                        ))}
+                      <div className="mt-2 overflow-x-auto pb-1">
+                        <div className="flex gap-2 whitespace-nowrap">
+                          {categoryOptions.map((categoryOption) => (
+                            <button
+                              key={categoryOption}
+                              type="button"
+                              onClick={() => setForm({ ...form, category: categoryOption })}
+                              className={
+                                normalizeProductText(form.category) ===
+                                normalizeProductText(categoryOption)
+                                  ? "rounded-full bg-[#cf5a5a] px-3 py-1 text-xs font-medium text-white"
+                                  : "rounded-full bg-[#efebe6] px-3 py-1 text-xs font-medium text-[#171717]"
+                              }
+                            >
+                              {categoryOption}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     ) : null}
                   </div>
@@ -2197,7 +2201,7 @@ export default function Transactions() {
       <AlertDialog open={Boolean(pendingAddTransactionForm)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Confirm Transaction</AlertDialogTitle>
+            <AlertDialogTitle className="text-white">Confirm Transaction</AlertDialogTitle>
             <AlertDialogDescription>
               {pendingAddTransactionForm?.type === "incoming"
                 ? "Add this incoming transaction to your inventory?"
@@ -2205,7 +2209,10 @@ export default function Transactions() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setPendingAddTransactionForm(null)}>
+            <AlertDialogCancel
+              onClick={() => setPendingAddTransactionForm(null)}
+              className="text-white"
+            >
               Cancel
             </AlertDialogCancel>
             <AlertDialogAction
