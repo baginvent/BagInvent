@@ -281,7 +281,7 @@ const buildUnitPriceByName = (transactions: Transaction[]) => {
       return;
     }
 
-    values.set(transaction.product_name, transaction.amount / transaction.quantity);
+    values.set(transaction.product_name, transaction.amount);
   });
 
   return values;
