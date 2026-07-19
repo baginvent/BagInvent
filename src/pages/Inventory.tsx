@@ -35,6 +35,15 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -87,6 +96,7 @@ const STATUS_FILTER_OPTIONS: Array<{ label: string; value: InventoryStatusFilter
   { label: "Low Stock", value: "low-stock" },
   { label: "Critical Stock", value: "critical" },
 ];
+const PRODUCTS_PER_PAGE = 20;
 
 const getProductGroupKey = (product: Pick<Product, "category" | "name">) =>
   `${product.name.trim().toLowerCase()}::${product.category.trim().toLowerCase()}`;
@@ -128,6 +138,128 @@ const getDaysUntil = (expiryDate: string | null) => {
 const isExpiringSoon = (expiryDate: string | null) => {
   const daysUntilExpiry = getDaysUntil(expiryDate);
   return Number.isFinite(daysUntilExpiry) && daysUntilExpiry >= 0 && daysUntilExpiry <= 30;
+};
+
+const buildPaginationItems = (currentPage: number, totalPages: number): Array<number | "ellipsis"> => {
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, index) => index + 1);
+  }
+
+  const pages = new Set([1, totalPages, currentPage - 1, currentPage, currentPage + 1]);
+  const visiblePages = Array.from(pages)
+    .filter((page) => page >= 1 && page <= totalPages)
+    .sort((left, right) => left - right);
+
+  const items: Array<number | "ellipsis"> = [];
+  let previousPage = 0;
+
+  visiblePages.forEach((page) => {
+    if (page - previousPage > 1) {
+      items.push("ellipsis");
+    }
+
+    items.push(page);
+    previousPage = page;
+  });
+
+  return items;
+};
+
+type InventoryPaginationProps = {
+  currentPage: number;
+  itemLabel: string;
+  onPageChange: (page: number) => void;
+  totalCount: number;
+  totalPages: number;
+};
+
+const InventoryPagination = ({
+  currentPage,
+  itemLabel,
+  onPageChange,
+  totalCount,
+  totalPages,
+}: InventoryPaginationProps) => {
+  if (totalPages <= 1) {
+    return null;
+  }
+
+  const activePage = Math.min(currentPage, totalPages);
+  const paginationItems = buildPaginationItems(activePage, totalPages);
+  const startItem = (activePage - 1) * PRODUCTS_PER_PAGE + 1;
+  const endItem = Math.min(activePage * PRODUCTS_PER_PAGE, totalCount);
+
+  return (
+    <div className="flex flex-col gap-3 border-t border-white/20 px-3 py-4 sm:flex-row sm:items-center sm:justify-between">
+      <p className="text-sm text-[#666]">
+        Showing {Math.min(startItem, totalCount)}-{endItem} of {totalCount} {itemLabel}
+      </p>
+      <Pagination className="mx-0 justify-start sm:justify-end">
+        <PaginationContent className="flex-wrap">
+          <PaginationItem>
+            <PaginationPrevious
+              href="#"
+              aria-disabled={activePage === 1}
+              tabIndex={activePage === 1 ? -1 : 0}
+              className={activePage === 1 ? "pointer-events-none opacity-50" : undefined}
+              onClick={(event) => {
+                event.preventDefault();
+
+                if (activePage === 1) {
+                  return;
+                }
+
+                onPageChange(activePage - 1);
+              }}
+            />
+          </PaginationItem>
+          {paginationItems.map((item, index) =>
+            item === "ellipsis" ? (
+              <PaginationItem key={`pagination-ellipsis-${index}`}>
+                <PaginationEllipsis />
+              </PaginationItem>
+            ) : (
+              <PaginationItem key={item}>
+                <PaginationLink
+                  href="#"
+                  size="default"
+                  isActive={item === activePage}
+                  className={
+                    item === activePage
+                      ? "bg-[#171717] text-white hover:bg-[#171717] hover:text-white"
+                      : undefined
+                  }
+                  onClick={(event) => {
+                    event.preventDefault();
+                    onPageChange(item);
+                  }}
+                >
+                  {item}
+                </PaginationLink>
+              </PaginationItem>
+            ),
+          )}
+          <PaginationItem>
+            <PaginationNext
+              href="#"
+              aria-disabled={activePage === totalPages}
+              tabIndex={activePage === totalPages ? -1 : 0}
+              className={activePage === totalPages ? "pointer-events-none opacity-50" : undefined}
+              onClick={(event) => {
+                event.preventDefault();
+
+                if (activePage === totalPages) {
+                  return;
+                }
+
+                onPageChange(activePage + 1);
+              }}
+            />
+          </PaginationItem>
+        </PaginationContent>
+      </Pagination>
+    </div>
+  );
 };
 
 const getProductColor = (name: string) =>
@@ -217,6 +349,8 @@ export default function Inventory() {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All");
   const [statusFilter, setStatusFilter] = useState<InventoryStatusFilter>("all");
+  const [currentProductsPage, setCurrentProductsPage] = useState(1);
+  const [currentExpiredProductsPage, setCurrentExpiredProductsPage] = useState(1);
   const [quantityDrafts, setQuantityDrafts] = useState<Record<string, string>>({});
   const [isSeeding, setIsSeeding] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
@@ -451,12 +585,45 @@ export default function Inventory() {
   );
 
   useEffect(() => {
+    setCurrentProductsPage(1);
+  }, [category, search, statusFilter]);
+
+  useEffect(() => {
+    setCurrentExpiredProductsPage(1);
+  }, [category, search]);
+
+  useEffect(() => {
     const visibleGroupKeys = new Set(groupedProductsByStatus.map((group) => group.key));
 
     setExpandedGroups((currentGroups) =>
       currentGroups.filter((groupKey) => visibleGroupKeys.has(groupKey)),
     );
   }, [groupedProductsByStatus]);
+
+  const totalProductPages = Math.ceil(groupedProductsByStatus.length / PRODUCTS_PER_PAGE);
+  const activeProductsPage = totalProductPages === 0 ? 1 : Math.min(currentProductsPage, totalProductPages);
+  const paginatedProducts = useMemo(
+    () =>
+      groupedProductsByStatus.slice(
+        (activeProductsPage - 1) * PRODUCTS_PER_PAGE,
+        activeProductsPage * PRODUCTS_PER_PAGE,
+      ),
+    [activeProductsPage, groupedProductsByStatus],
+  );
+  const totalExpiredPages = Math.ceil(expiredProducts.length / PRODUCTS_PER_PAGE);
+  const activeExpiredProductsPage = totalExpiredPages === 0 ? 1 : Math.min(currentExpiredProductsPage, totalExpiredPages);
+  const paginatedExpiredProducts = useMemo(
+    () =>
+      expiredProducts.slice(
+        (activeExpiredProductsPage - 1) * PRODUCTS_PER_PAGE,
+        activeExpiredProductsPage * PRODUCTS_PER_PAGE,
+      ),
+    [activeExpiredProductsPage, expiredProducts],
+  );
+  const expiredPaginationItems = useMemo(
+    () => buildPaginationItems(activeExpiredProductsPage, totalExpiredPages),
+    [activeExpiredProductsPage, totalExpiredPages],
+  );
 
   const getDraftQuantityValue = (group: ProductGroup) =>
     quantityDrafts[group.key] ?? String(group.totalQuantity);
@@ -781,7 +948,8 @@ export default function Inventory() {
               <Loader2 className="h-6 w-6 animate-spin text-[#666]" />
             </div>
           ) : (
-            <Table>
+            <>
+              <Table>
               <TableHeader>
                 <TableRow className="border-b border-white/40 hover:bg-transparent">
                   <TableHead className="text-[#4c4c4c]">Product</TableHead>
@@ -820,7 +988,7 @@ export default function Inventory() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  groupedProductsByStatus.map((group) => {
+                  paginatedProducts.map((group) => {
                     const isExpanded = expandedGroups.includes(group.key);
                     const hasMultipleBatches = group.batchCount > 1;
                     const draftQuantity = getDraftQuantityValue(group);
@@ -983,7 +1151,15 @@ export default function Inventory() {
                   })
                 )}
               </TableBody>
-            </Table>
+              </Table>
+              <InventoryPagination
+                currentPage={activeProductsPage}
+                itemLabel="products"
+                onPageChange={setCurrentProductsPage}
+                totalCount={groupedProductsByStatus.length}
+                totalPages={totalProductPages}
+              />
+            </>
           )}
         </div>
 
@@ -1009,7 +1185,8 @@ export default function Inventory() {
               <Loader2 className="h-6 w-6 animate-spin text-[#666]" />
             </div>
           ) : (
-            <Table>
+            <>
+              <Table>
               <TableHeader>
                 <TableRow className="border-b border-white/40 hover:bg-transparent">
                   <TableHead className="text-[#4c4c4c]">Product</TableHead>
@@ -1028,7 +1205,7 @@ export default function Inventory() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  expiredProducts.map((product) => (
+                  paginatedExpiredProducts.map((product) => (
                     <TableRow key={product.id} className="border-b border-white/25 hover:bg-white/15">
                       <TableCell className="font-medium text-[#171717]">{product.name}</TableCell>
                       <TableCell className="text-[#444]">{product.category}</TableCell>
@@ -1054,7 +1231,15 @@ export default function Inventory() {
                   ))
                 )}
               </TableBody>
-            </Table>
+              </Table>
+              <InventoryPagination
+                currentPage={activeExpiredProductsPage}
+                itemLabel="expired batches"
+                onPageChange={setCurrentExpiredProductsPage}
+                totalCount={expiredProducts.length}
+                totalPages={totalExpiredPages}
+              />
+            </>
           )}
         </div>
       </div>
