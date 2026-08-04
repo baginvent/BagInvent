@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { AlertTriangle, Clock, DollarSign, Loader2, Package } from "lucide-react";
+import { AlertTriangle, BellRing, Clock, DollarSign, Loader2, Package, PackageX } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { StatCard } from "@/components/dashboard/StatCard";
@@ -14,6 +14,7 @@ import {
   isMissingTransactionsTableError,
 } from "@/lib/demoData";
 import { buildMockTransactions, formatCurrency } from "@/lib/forecastInsights";
+import { getDaysUntilExpiry, getInventoryThresholds, getStockLevel, type InventoryThresholds } from "@/lib/inventoryInsights";
 import { toast } from "sonner";
 
 type Product = Tables<"products">;
@@ -25,24 +26,20 @@ const getTodayDateKey = () =>
     .toISOString()
     .split("T")[0];
 
-const getDaysUntil = (date: string | null) => {
-  if (!date) {
-    return Number.POSITIVE_INFINITY;
-  }
-
-  const expiry = new Date(`${date}T00:00:00`);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  return Math.round((expiry.getTime() - today.getTime()) / 86400000);
-};
-
 const Index = () => {
   const navigate = useNavigate();
   const { user } = useAuthContext();
   const queryClient = useQueryClient();
   const [isSeeding, setIsSeeding] = useState(false);
+  const [thresholds, setThresholds] = useState<InventoryThresholds>(() => getInventoryThresholds(user?.id));
   const todayDateKey = getTodayDateKey();
+
+  useEffect(() => {
+    const syncThresholds = () => setThresholds(getInventoryThresholds(user?.id));
+    syncThresholds();
+    window.addEventListener("baginvent:inventory-thresholds", syncThresholds);
+    return () => window.removeEventListener("baginvent:inventory-thresholds", syncThresholds);
+  }, [user?.id]);
 
   useEffect(() => {
     if (!user) {
@@ -134,23 +131,36 @@ const Index = () => {
 
   const stats = useMemo(() => {
     const totalUnits = products.reduce((sum, product) => sum + product.quantity, 0);
-    const lowStockItems = products.filter((product) => product.quantity > 0 && product.quantity <= 10)
-      .length;
+    const lowStockItems = products.filter((product) => getStockLevel(product.quantity, thresholds) === "low").length;
+    const criticalStockItems = products.filter((product) => getStockLevel(product.quantity, thresholds) === "critical").length;
+    const outOfStockItems = products.filter((product) => getStockLevel(product.quantity, thresholds) === "out").length;
     const expiringSoon = products.filter((product) => {
-      const daysUntilExpiry = getDaysUntil(product.expiry_date);
-      return product.quantity > 0 && daysUntilExpiry >= 0 && daysUntilExpiry <= 30;
+      const daysUntilExpiry = getDaysUntilExpiry(product.expiry_date);
+      return product.quantity > 0 && daysUntilExpiry >= 0 && daysUntilExpiry <= thresholds.expiryDays;
     }).length;
     const todaySales = transactions
       .filter((transaction) => transaction.type === "sale" && transaction.date === todayDateKey)
       .reduce((sum, transaction) => sum + transaction.amount, 0);
 
     return {
+      criticalStockItems,
       expiringSoon,
       lowStockItems,
+      outOfStockItems,
       todaySales,
       totalUnits,
     };
-  }, [products, todayDateKey, transactions]);
+  }, [products, thresholds, todayDateKey, transactions]);
+
+  const alerts = useMemo(() => [
+    ...products.filter((product) => getStockLevel(product.quantity, thresholds) === "out").map((product) => ({ product, tone: "critical", text: "Out of stock — replenish immediately" })),
+    ...products.filter((product) => getStockLevel(product.quantity, thresholds) === "critical").map((product) => ({ product, tone: "critical", text: `${product.quantity} units left — critical threshold is ${thresholds.critical}` })),
+    ...products.filter((product) => getStockLevel(product.quantity, thresholds) === "low").map((product) => ({ product, tone: "warning", text: `${product.quantity} units left — low threshold is ${thresholds.low}` })),
+    ...products.filter((product) => {
+      const days = getDaysUntilExpiry(product.expiry_date);
+      return product.quantity > 0 && days >= 0 && days <= thresholds.expiryDays;
+    }).map((product) => ({ product, tone: "warning", text: `Expires in ${getDaysUntilExpiry(product.expiry_date)} day(s)` })),
+  ].slice(0, 6), [products, thresholds]);
 
   return (
     <DashboardLayout pageLabel="Dashboard">
@@ -167,7 +177,7 @@ const Index = () => {
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
               <StatCard
                 title="Total products"
                 value={stats.totalUnits.toLocaleString()}
@@ -176,8 +186,16 @@ const Index = () => {
                 onClick={() => navigate("/inventory")}
               />
               <StatCard
+                title="Out of Stock"
+                value={stats.outOfStockItems}
+                icon={PackageX}
+                badgeText="Reorder now"
+                variant="danger"
+                onClick={() => navigate("/inventory")}
+              />
+              <StatCard
                 title="Low Stock Items"
-                value={stats.lowStockItems}
+                value={stats.lowStockItems + stats.criticalStockItems}
                 icon={AlertTriangle}
                 badgeText="Attention!"
                 variant="warning"
@@ -204,6 +222,24 @@ const Index = () => {
             <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.05fr_1fr]">
               <TopSellingChart />
               <AIForecastCard products={products} transactions={transactions} />
+            </div>
+
+            <div className="workspace-panel">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <BellRing className="h-5 w-5 text-primary" />
+                  <h2 className="text-lg font-medium text-[#171717]">Inventory notifications</h2>
+                </div>
+                <button onClick={() => navigate("/inventory")} className="text-sm font-medium text-primary hover:underline">Manage inventory</button>
+              </div>
+              {alerts.length === 0 ? <p className="text-sm text-[#666]">All inventory is within your thresholds and no products are expiring soon.</p> : (
+                <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                  {alerts.map((alert, index) => <button key={`${alert.product.id}-${alert.text}-${index}`} onClick={() => navigate("/inventory")} className="rounded-[4px] bg-[#efebe6] p-3 text-left hover:bg-[#e8e2db]">
+                    <p className="text-sm font-medium text-[#171717]">{alert.product.name}</p>
+                    <p className={alert.tone === "critical" ? "mt-1 text-xs text-primary" : "mt-1 text-xs text-[#9a6a08]"}>{alert.text}</p>
+                  </button>)}
+                </div>
+              )}
             </div>
           </>
         )}

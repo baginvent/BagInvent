@@ -426,6 +426,36 @@ export default function Reports() {
     ].filter((item) => item.units > 0);
   }, [filteredProducts]);
 
+  const inventorySummary = useMemo(() => {
+    const salesByName = new Map<string, number>();
+    const priceByName = new Map<string, number>();
+    [...transactions]
+      .sort((left, right) => right.date.localeCompare(left.date) || right.created_at.localeCompare(left.created_at))
+      .forEach((transaction) => {
+        if (transaction.type === "sale") {
+          salesByName.set(transaction.product_name, (salesByName.get(transaction.product_name) ?? 0) + transaction.quantity);
+        }
+        if (!priceByName.has(transaction.product_name) && transaction.quantity > 0) {
+          priceByName.set(transaction.product_name, transaction.amount);
+        }
+      });
+
+    const totalSalesUnits = [...salesByName.values()].reduce((sum, quantity) => sum + quantity, 0);
+    const currentUnits = filteredProducts.reduce((sum, product) => sum + product.quantity, 0);
+    const turnover = currentUnits === 0 ? 0 : totalSalesUnits / currentUnits;
+    const slowMoving = filteredProducts
+      .map((product) => ({ product, sold: salesByName.get(product.name) ?? 0 }))
+      .filter((item) => item.sold <= 2)
+      .sort((left, right) => left.sold - right.sold || right.product.quantity - left.product.quantity)
+      .slice(0, 5);
+    const valuation = filteredProducts.reduce(
+      (sum, product) => sum + product.quantity * (priceByName.get(product.name) ?? 0),
+      0,
+    );
+
+    return { currentUnits, slowMoving, totalSalesUnits, turnover, valuation };
+  }, [filteredProducts, transactions]);
+
   const handleExportPDF = async () => {
     const reportPanels = [
       { element: salesPanelRef.current, title: activeDateRange ? "Sales Trend" : "Weekly Sales" },
@@ -695,6 +725,27 @@ export default function Reports() {
               </div>
             )}
           </div>
+        </div>
+
+        <div className="workspace-panel">
+          <div className="mb-5">
+            <h2 className="text-lg font-medium text-[#171717]">Inventory summary</h2>
+            <p className="mt-1 text-sm text-[#666]">A concise view of turnover, slow-moving inventory, and current product valuation.</p>
+          </div>
+          {isLoading ? (
+            <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-[#666]" /></div>
+          ) : (
+            <>
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="rounded-[4px] bg-[#efebe6] p-4"><p className="text-xs uppercase tracking-[0.14em] text-[#666]">Inventory turnover rate</p><p className="mt-2 text-2xl font-medium text-[#171717]">{inventorySummary.turnover.toFixed(2)}×</p><p className="mt-1 text-xs text-[#666]">{inventorySummary.totalSalesUnits} sold / {inventorySummary.currentUnits} units on hand</p></div>
+                <div className="rounded-[4px] bg-[#efebe6] p-4"><p className="text-xs uppercase tracking-[0.14em] text-[#666]">Slow-moving items</p><p className="mt-2 text-2xl font-medium text-[#171717]">{inventorySummary.slowMoving.length}</p><p className="mt-1 text-xs text-[#666]">Products with two or fewer recorded sales</p></div>
+                <div className="rounded-[4px] bg-[#efebe6] p-4"><p className="text-xs uppercase tracking-[0.14em] text-[#666]">Product valuation</p><p className="mt-2 text-2xl font-medium text-[#171717]">{formatCurrency(inventorySummary.valuation)}</p><p className="mt-1 text-xs text-[#666]">Based on latest recorded unit price</p></div>
+              </div>
+              <div className="mt-5 overflow-x-auto">
+                <table className="w-full min-w-[520px] text-sm"><thead><tr className="border-b border-white/40 text-left"><th className="px-3 py-3 text-xs uppercase tracking-[0.12em] text-[#666]">Slow-moving product</th><th className="px-3 py-3 text-xs uppercase tracking-[0.12em] text-[#666]">Category</th><th className="px-3 py-3 text-xs uppercase tracking-[0.12em] text-[#666]">Sold</th><th className="px-3 py-3 text-xs uppercase tracking-[0.12em] text-[#666]">On hand</th></tr></thead><tbody>{inventorySummary.slowMoving.length === 0 ? <tr><td colSpan={4} className="px-3 py-5 text-[#666]">No slow-moving items in this reporting range.</td></tr> : inventorySummary.slowMoving.map(({ product, sold }) => <tr key={product.id} className="border-b border-white/20"><td className="px-3 py-3 font-medium text-[#171717]">{product.name}</td><td className="px-3 py-3 text-[#555]">{product.category}</td><td className="px-3 py-3 text-[#555]">{sold}</td><td className="px-3 py-3 text-[#555]">{product.quantity}</td></tr>)}</tbody></table>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </DashboardLayout>

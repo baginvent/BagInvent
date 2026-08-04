@@ -9,6 +9,7 @@ import {
   Loader2,
   Plus,
   Search,
+  Settings2,
   Trash2,
 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -16,6 +17,7 @@ import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -60,10 +62,11 @@ import {
   isMissingTransactionsTableError,
 } from "@/lib/demoData";
 import { buildMockTransactions, formatCurrency } from "@/lib/forecastInsights";
+import { getDaysUntilExpiry, getInventoryThresholds, getStockLevel, saveInventoryThresholds, type InventoryThresholds } from "@/lib/inventoryInsights";
 
 type Product = Tables<"products">;
 type Transaction = Tables<"transactions">;
-type InventoryStatusFilter = "all" | "critical" | "in-stock" | "low-stock";
+type InventoryStatusFilter = "all" | "critical" | "in-stock" | "low-stock" | "out";
 type ProductQuantityUpdatePlan = {
   id: string;
   nextQuantity: number;
@@ -95,6 +98,7 @@ const STATUS_FILTER_OPTIONS: Array<{ label: string; value: InventoryStatusFilter
   { label: "In Stock", value: "in-stock" },
   { label: "Low Stock", value: "low-stock" },
   { label: "Critical Stock", value: "critical" },
+  { label: "Out of Stock", value: "out" },
 ];
 const PRODUCTS_PER_PAGE = 20;
 
@@ -122,23 +126,6 @@ const getTodayDateKey = () =>
 
 const isExpiredProduct = (product: Product, todayDateKey: string) =>
   Boolean(product.expiry_date && product.expiry_date < todayDateKey);
-
-const getDaysUntil = (expiryDate: string | null) => {
-  if (!expiryDate) {
-    return Number.POSITIVE_INFINITY;
-  }
-
-  const expiry = new Date(`${expiryDate}T00:00:00`);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  return Math.round((expiry.getTime() - today.getTime()) / 86400000);
-};
-
-const isExpiringSoon = (expiryDate: string | null) => {
-  const daysUntilExpiry = getDaysUntil(expiryDate);
-  return Number.isFinite(daysUntilExpiry) && daysUntilExpiry >= 0 && daysUntilExpiry <= 30;
-};
 
 const buildPaginationItems = (currentPage: number, totalPages: number): Array<number | "ellipsis"> => {
   if (totalPages <= 7) {
@@ -356,10 +343,24 @@ export default function Inventory() {
   const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
   const [productPendingDelete, setProductPendingDelete] = useState<Product | null>(null);
   const [productGroupPendingDelete, setProductGroupPendingDelete] = useState<ProductGroup | null>(null);
+  const [isThresholdDialogOpen, setIsThresholdDialogOpen] = useState(false);
 
   const { user } = useAuthContext();
   const queryClient = useQueryClient();
   const todayDateKey = getTodayDateKey();
+  const [thresholds, setThresholds] = useState<InventoryThresholds>(() => getInventoryThresholds(user?.id));
+  const [thresholdDraft, setThresholdDraft] = useState<InventoryThresholds>(() => getInventoryThresholds(user?.id));
+
+  useEffect(() => {
+    const next = getInventoryThresholds(user?.id);
+    setThresholds(next);
+    setThresholdDraft(next);
+  }, [user?.id]);
+
+  const isExpiringSoon = (expiryDate: string | null) => {
+    const daysUntilExpiry = getDaysUntilExpiry(expiryDate);
+    return Number.isFinite(daysUntilExpiry) && daysUntilExpiry >= 0 && daysUntilExpiry <= thresholds.expiryDays;
+  };
 
   useEffect(() => {
     if (!user) {
@@ -546,19 +547,17 @@ export default function Inventory() {
     switch (status) {
       case "low":
         return <span className="status-warning">Low Stock</span>;
-      case "out":
+      case "critical":
         return <span className="status-low">Critical Stock</span>;
+      case "out":
+        return <span className="status-low">Out of Stock</span>;
       default:
         return <span className="status-normal">In Stock</span>;
     }
   };
 
   const getGroupStatus = (group: ProductGroup) => {
-    if (group.products.some((product) => product.status === "warning")) {
-      return "warning";
-    }
-
-    return getStatusFromQuantity(group.totalQuantity);
+    return getStockLevel(group.totalQuantity, thresholds);
   };
 
   const groupedProductsByStatus = useMemo(
@@ -576,12 +575,14 @@ export default function Inventory() {
           case "low-stock":
             return groupStatus === "low";
           case "critical":
+            return groupStatus === "critical";
+          case "out":
             return groupStatus === "out";
           default:
             return true;
         }
       }),
-    [groupedProducts, statusFilter],
+    [groupedProducts, statusFilter, thresholds],
   );
 
   useEffect(() => {
@@ -835,16 +836,16 @@ export default function Inventory() {
     [groupedProducts],
   );
   const lowStockGroups = useMemo(
-    () => groupedProducts.filter((group) => getGroupStatus(group) === "low").length,
-    [groupedProducts],
+    () => groupedProducts.filter((group) => ["low", "critical"].includes(getGroupStatus(group))).length,
+    [groupedProducts, thresholds],
   );
   const expiringSoonCount = useMemo(
     () =>
       groupedProducts.filter((group) => {
-        const daysUntilExpiry = getDaysUntil(group.earliestExpiry);
-        return Number.isFinite(daysUntilExpiry) && daysUntilExpiry >= 0 && daysUntilExpiry <= 30;
+        const daysUntilExpiry = getDaysUntilExpiry(group.earliestExpiry);
+        return Number.isFinite(daysUntilExpiry) && daysUntilExpiry >= 0 && daysUntilExpiry <= thresholds.expiryDays;
       }).length,
-    [groupedProducts],
+    [groupedProducts, thresholds],
   );
   const inventoryValue = useMemo(
     () =>
@@ -884,6 +885,10 @@ export default function Inventory() {
             <h1 className="text-[2rem] font-medium text-[#171717]">Inventory Management</h1>
           </div>
           <div className="flex flex-wrap gap-3">
+            <button className="workspace-action" onClick={() => setIsThresholdDialogOpen(true)}>
+              <Settings2 className="mr-2 h-4 w-4" />
+              Stock thresholds
+            </button>
             <button className="workspace-action" onClick={() => navigate("/transactions")}>
               <Plus className="mr-2 h-4 w-4" />
               Add Item
@@ -1135,7 +1140,7 @@ export default function Inventory() {
                                     </p>
                                     <p className="text-xs text-[#666]">Stock: {product.quantity}</p>
                                     <div className="mt-2 flex flex-wrap items-center gap-2">
-                                      {getStatusBadge(product.status)}
+                                      {getStatusBadge(getStockLevel(product.quantity, thresholds))}
                                       {isExpiringSoon(product.expiry_date) ? (
                                         <span className="status-warning">Expiring Soon</span>
                                       ) : null}
@@ -1290,6 +1295,30 @@ export default function Inventory() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog open={isThresholdDialogOpen} onOpenChange={setIsThresholdDialogOpen}>
+        <DialogContent className="border-[#d9d2c9] bg-[#f7f4ef] text-[#171717] sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Stock thresholds</DialogTitle>
+            <DialogDescription className="text-[#666]">Set the quantities that trigger inventory alerts. Out-of-stock items always alert at zero.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <label className="grid gap-2 text-sm font-medium">Critical stock (units)
+              <Input type="number" min="1" value={thresholdDraft.critical} onChange={(event) => setThresholdDraft((current) => ({ ...current, critical: Math.max(1, Number(event.target.value) || 1) }))} />
+            </label>
+            <label className="grid gap-2 text-sm font-medium">Low stock (units)
+              <Input type="number" min={thresholdDraft.critical + 1} value={thresholdDraft.low} onChange={(event) => setThresholdDraft((current) => ({ ...current, low: Math.max(current.critical + 1, Number(event.target.value) || current.critical + 1) }))} />
+            </label>
+            <label className="grid gap-2 text-sm font-medium">Expiring soon (days)
+              <Input type="number" min="1" value={thresholdDraft.expiryDays} onChange={(event) => setThresholdDraft((current) => ({ ...current, expiryDays: Math.max(1, Number(event.target.value) || 1) }))} />
+            </label>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => { setThresholdDraft(thresholds); setIsThresholdDialogOpen(false); }}>Cancel</Button>
+            <Button type="button" onClick={() => { const next = { ...thresholdDraft, low: Math.max(thresholdDraft.low, thresholdDraft.critical + 1) }; setThresholds(next); setThresholdDraft(next); saveInventoryThresholds(user?.id, next); setIsThresholdDialogOpen(false); toast.success("Inventory thresholds saved."); }}>Save thresholds</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete Product Group Confirmation Dialog */}
       <AlertDialog open={Boolean(productGroupPendingDelete)}>
