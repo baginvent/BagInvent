@@ -68,18 +68,6 @@ const confidenceStyles: Record<ForecastConfidence, string> = {
   medium: "bg-[#fff2ab] text-[#8a6b08]",
 };
 
-const summarizeForecastText = (text: string, maxWords = 16) => {
-  const firstSentence = text.split(/(?<=[.!?])\s+/)[0]?.trim() ?? "";
-  const normalizedText = firstSentence || text.trim();
-  const words = normalizedText.split(/\s+/).filter(Boolean);
-
-  if (words.length <= maxWords) {
-    return normalizedText;
-  }
-
-  return `${words.slice(0, maxWords).join(" ")}...`;
-};
-
 export default function Forecast() {
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [forecastVersion, setForecastVersion] = useState(0);
@@ -394,7 +382,7 @@ export default function Forecast() {
                 <div className="mt-4 space-y-4 text-sm text-[#333]">
                   {aiInsights.map((insight) => (
                     <div key={insight.text} className="space-y-1">
-                      <p>{summarizeForecastText(insight.text, 16)}</p>
+                      <p className="leading-6">{insight.text}</p>
                     </div>
                   ))}
                 </div>
@@ -553,7 +541,7 @@ export default function Forecast() {
                     <div className="mt-2 space-y-2">
                       {demandPlanning.methodology.map((item) => (
                         <p key={item} className="text-sm text-[#555]">
-                          {summarizeForecastText(item, 14)}
+                          {item}
                         </p>
                       ))}
                     </div>
@@ -563,7 +551,7 @@ export default function Forecast() {
                     <div className="mt-2 space-y-2">
                       {demandPlanning.assumptions.map((item) => (
                         <p key={item} className="text-sm text-[#555]">
-                          {summarizeForecastText(item, 14)}
+                          {item}
                         </p>
                       ))}
                     </div>
@@ -576,7 +564,7 @@ export default function Forecast() {
                 <div className="mt-4 space-y-3">
                   {demandPlanning.insights.map((insight) => (
                     <div key={insight} className="workspace-card-soft">
-                      <p className="text-sm text-[#333]">{summarizeForecastText(insight, 15)}</p>
+                      <p className="text-sm leading-6 text-[#333]">{insight}</p>
                     </div>
                   ))}
                 </div>
@@ -634,7 +622,7 @@ export default function Forecast() {
                         <td className="px-3 py-4">
                           <p className="font-medium text-[#171717]">{forecast.productName}</p>
                           <p className="mt-1 text-xs text-[#666]">
-                            {summarizeForecastText(forecast.reasoning, 14)}
+                            {forecast.reasoning}
                           </p>
                         </td>
                         <td className="px-3 py-4 text-sm text-[#333]">{forecast.category}</td>
@@ -703,7 +691,7 @@ export default function Forecast() {
                           <div>
                             <p className="font-medium text-[#171717]">{item.productName}</p>
                             <p className="mt-1 text-sm text-[#555]">
-                              {summarizeForecastText(item.reason, 16)}
+                              {item.reason}
                             </p>
                           </div>
                           <span className="rounded-full bg-[#d7f6e3] px-3 py-1 text-xs font-medium text-[#2f7b54]">
@@ -732,7 +720,7 @@ export default function Forecast() {
                           <div>
                             <p className="font-medium text-[#171717]">{item.productName}</p>
                             <p className="mt-1 text-sm text-[#555]">
-                              {summarizeForecastText(item.reason, 16)}
+                              {item.reason}
                             </p>
                           </div>
                           <span className="rounded-full bg-[#ffd9d9] px-3 py-1 text-xs font-medium text-primary">
@@ -757,7 +745,7 @@ export default function Forecast() {
                     <div key={item.tip}>
                       <p className="font-medium text-[#171717]">{item.tip}</p>
                       <p className="mt-1 text-sm text-[#555]">
-                        {summarizeForecastText(item.description, 15)}
+                        {item.description}
                       </p>
                     </div>
                   ))}

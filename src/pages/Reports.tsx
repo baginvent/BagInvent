@@ -419,10 +419,10 @@ export default function Reports() {
       totalUnits === 0 ? 0 : Math.round((value / totalUnits) * 100);
 
     return [
-      { color: "var(--destructive)", name: "Critical (0-7 days)", units: totals.critical, value: toPercent(totals.critical) },
-      { color: "var(--warning)", name: "Attention (8-30 days)", units: totals.attention, value: toPercent(totals.attention) },
-      { color: "var(--success)", name: "Healthy (31+ days)", units: totals.healthy, value: toPercent(totals.healthy) },
-      { color: "var(--primary)", name: "No Expiry", units: totals.noExpiry, value: toPercent(totals.noExpiry) },
+      { color: "#d95454", name: "Critical (0-7 days)", units: totals.critical, value: toPercent(totals.critical) },
+      { color: "#e2a31b", name: "Attention (8-30 days)", units: totals.attention, value: toPercent(totals.attention) },
+      { color: "#46a36b", name: "Healthy (31+ days)", units: totals.healthy, value: toPercent(totals.healthy) },
+      { color: "#4d78cc", name: "No Expiry", units: totals.noExpiry, value: toPercent(totals.noExpiry) },
     ].filter((item) => item.units > 0);
   }, [filteredProducts]);
 
@@ -621,7 +621,7 @@ export default function Reports() {
                     />
                     <Bar dataKey="sales">
                       {salesData.map((_, index) => (
-                          <Cell key={index} fill={index === salesData.length - 1 ? "var(--destructive)" : "var(--primary)"} />
+                          <Cell key={index} fill={index === salesData.length - 1 ? "#d95454" : "#4d78cc"} />
                       ))}
                     </Bar>
                   </BarChart>
@@ -658,8 +658,8 @@ export default function Reports() {
                       }}
                       formatter={(value: number) => [`${value} units`, "Movement"]}
                     />
-                    <Line type="monotone" dataKey="incoming" stroke="var(--success)" strokeWidth={2.2} dot={false} />
-                    <Line type="monotone" dataKey="outgoing" stroke="var(--primary)" strokeWidth={2.2} dot={false} />
+                    <Line type="monotone" dataKey="incoming" name="Incoming" stroke="#46a36b" strokeWidth={2.2} dot={false} />
+                    <Line type="monotone" dataKey="outgoing" name="Outgoing" stroke="#4d78cc" strokeWidth={2.2} dot={false} />
                   </LineChart>
                 </ResponsiveContainer>
               )}
