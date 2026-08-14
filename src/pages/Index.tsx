@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { AlertTriangle, BellRing, Clock, DollarSign, Loader2, Package, PackageX } from "lucide-react";
+import { AlertTriangle, Clock, DollarSign, Loader2, Package, PackageX } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { StatCard } from "@/components/dashboard/StatCard";
@@ -152,16 +152,6 @@ const Index = () => {
     };
   }, [products, thresholds, todayDateKey, transactions]);
 
-  const alerts = useMemo(() => [
-    ...products.filter((product) => getStockLevel(product.quantity, thresholds) === "out").map((product) => ({ product, tone: "critical", text: "Out of stock — replenish immediately" })),
-    ...products.filter((product) => getStockLevel(product.quantity, thresholds) === "critical").map((product) => ({ product, tone: "critical", text: `${product.quantity} units left — critical threshold is ${thresholds.critical}` })),
-    ...products.filter((product) => getStockLevel(product.quantity, thresholds) === "low").map((product) => ({ product, tone: "warning", text: `${product.quantity} units left — low threshold is ${thresholds.low}` })),
-    ...products.filter((product) => {
-      const days = getDaysUntilExpiry(product.expiry_date);
-      return product.quantity > 0 && days >= 0 && days <= thresholds.expiryDays;
-    }).map((product) => ({ product, tone: "warning", text: `Expires in ${getDaysUntilExpiry(product.expiry_date)} day(s)` })),
-  ].slice(0, 6), [products, thresholds]);
-
   return (
     <DashboardLayout pageLabel="Dashboard">
       <div className="space-y-6">
@@ -222,24 +212,6 @@ const Index = () => {
             <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.05fr_1fr]">
               <TopSellingChart />
               <AIForecastCard products={products} transactions={transactions} />
-            </div>
-
-            <div className="workspace-panel">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <BellRing className="h-5 w-5 text-primary" />
-                  <h2 className="text-lg font-medium text-[#171717]">Inventory notifications</h2>
-                </div>
-                <button onClick={() => navigate("/inventory")} className="text-sm font-medium text-primary hover:underline">Manage inventory</button>
-              </div>
-              {alerts.length === 0 ? <p className="text-sm text-[#666]">All inventory is within your thresholds and no products are expiring soon.</p> : (
-                <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-                  {alerts.map((alert, index) => <button key={`${alert.product.id}-${alert.text}-${index}`} onClick={() => navigate("/inventory")} className="rounded-[4px] bg-[#efebe6] p-3 text-left hover:bg-[#e8e2db]">
-                    <p className="text-sm font-medium text-[#171717]">{alert.product.name}</p>
-                    <p className={alert.tone === "critical" ? "mt-1 text-xs text-primary" : "mt-1 text-xs text-[#9a6a08]"}>{alert.text}</p>
-                  </button>)}
-                </div>
-              )}
             </div>
           </>
         )}

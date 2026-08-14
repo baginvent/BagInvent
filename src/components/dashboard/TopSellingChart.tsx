@@ -11,7 +11,7 @@ import {
   startOfWeek,
 } from "date-fns";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
+import { Loader2, Trophy } from "lucide-react";
 import {
   Bar,
   BarChart,
@@ -41,7 +41,7 @@ type TopSellingDatum = {
 };
 
 const EMPTY_TRANSACTIONS: Transaction[] = [];
-const BAR_COLORS = ["#2d63c8", "#356cd4", "#4275db", "#4f7ce0", "#5d85e5"];
+const BAR_COLORS = ["#fbbf24", "#fb7185", "#a78bfa", "#38bdf8", "#34d399"];
 const DATE_FILTER_OPTIONS: Array<{ label: string; value: DateFilterType }> = [
   { label: "All", value: "all" },
   { label: "Week", value: "week" },
@@ -90,7 +90,7 @@ const ProductAxisTick = ({ payload, x = 0, y = 0 }: ProductAxisTickProps) => {
 
   return (
     <g transform={`translate(${x},${y})`}>
-      <text fill="#272727" fontSize={10} textAnchor="middle">
+      <text fill="#e0e7ff" fontSize={10} textAnchor="middle">
         {lines.map((line, index) => (
           <tspan key={`${payload.value}-${index}`} x={0} dy={index === 0 ? 16 : 12}>
             {line}
@@ -314,14 +314,20 @@ export function TopSellingChart() {
   };
 
   return (
-    <div className="chart-container">
+    <div className="overflow-hidden rounded-xl border border-indigo-100 bg-gradient-to-br from-white via-indigo-50/70 to-violet-50 p-5 shadow-sm">
       <div className="mb-4 space-y-3">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-          <div>
-            <h3 className="text-lg font-medium text-[#171717]">Top selling Products</h3>
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 to-rose-500 text-white shadow-sm shadow-rose-200">
+              <Trophy className="h-5 w-5" aria-hidden="true" />
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold text-slate-900">Top selling products</h3>
+              <p className="mt-0.5 text-xs text-slate-500">Your best performers by units sold</p>
             {activeDateRange ? (
-              <p className="mt-1 text-xs text-[#666]">{activeDateRange.label}</p>
+              <p className="mt-1 text-xs font-medium text-indigo-600">{activeDateRange.label}</p>
             ) : null}
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2 xl:justify-end">
@@ -331,10 +337,10 @@ export function TopSellingChart() {
                 type="button"
                 onClick={() => handleDateFilterChange(option.value)}
                 className={cn(
-                  "rounded-[4px] border px-3 py-2 text-xs font-medium transition-colors",
+                  "rounded-lg border px-3 py-2 text-xs font-semibold transition-all",
                   dateFilterType === option.value
-                    ? "border-primary bg-primary/10 text-[#171717]"
-                    : "border-[#dfd8cf] bg-[#efebe6] text-[#171717] hover:bg-[#e7e1d8]",
+                    ? "border-indigo-600 bg-indigo-600 text-white shadow-sm shadow-indigo-200"
+                    : "border-indigo-100 bg-white/80 text-slate-600 hover:border-indigo-200 hover:bg-indigo-50",
                 )}
               >
                 {option.label}
@@ -350,20 +356,22 @@ export function TopSellingChart() {
               type="date"
               value={customFromDate}
               onChange={(event) => handleCustomFromDateChange(event.target.value)}
-              className="h-9 rounded-[4px] border-[#dfd8cf] bg-[#efebe6] text-xs text-[#171717] focus-visible:ring-primary focus-visible:ring-offset-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-70"
+              className="h-9 rounded-lg border-indigo-100 bg-white/80 text-xs text-slate-700 focus-visible:ring-indigo-500 focus-visible:ring-offset-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-70"
             />
             <Input
               aria-label="Custom range end date"
               type="date"
               value={customToDate}
               onChange={(event) => handleCustomToDateChange(event.target.value)}
-              className="h-9 rounded-[4px] border-[#dfd8cf] bg-[#efebe6] text-xs text-[#171717] focus-visible:ring-primary focus-visible:ring-offset-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-70"
+              className="h-9 rounded-lg border-indigo-100 bg-white/80 text-xs text-slate-700 focus-visible:ring-indigo-500 focus-visible:ring-offset-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-70"
             />
           </div>
         ) : null}
       </div>
 
-      <div className="h-[260px] rounded-[4px] bg-[#8f8f8f] px-3 py-2">
+      <div className="relative h-[260px] overflow-hidden rounded-xl bg-gradient-to-br from-indigo-700 via-violet-700 to-fuchsia-700 px-3 py-2 shadow-inner">
+        <div className="pointer-events-none absolute -right-10 -top-16 h-40 w-40 rounded-full bg-fuchsia-300/25 blur-2xl" />
+        <div className="pointer-events-none absolute -bottom-16 -left-8 h-36 w-36 rounded-full bg-cyan-300/20 blur-2xl" />
         {isLoading ? (
           <div className="flex h-full items-center justify-center">
             <Loader2 className="h-6 w-6 animate-spin text-white/70" />
@@ -381,28 +389,29 @@ export function TopSellingChart() {
         ) : (
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={chartData} margin={{ bottom: 24, left: 0, right: 8, top: 10 }}>
-              <CartesianGrid stroke="#bcbcbc" strokeDasharray="0" vertical={false} />
+              <CartesianGrid stroke="rgba(224,231,255,0.22)" strokeDasharray="4 4" vertical={false} />
               <XAxis
                 dataKey="name"
                 height={72}
                 interval={0}
-                stroke="#272727"
+                stroke="rgba(224,231,255,0.55)"
                 tick={<ProductAxisTick />}
                 tickLine={false}
               />
               <YAxis
                 allowDecimals={false}
-                stroke="#272727"
-                tick={{ fill: "#272727", fontSize: 10 }}
+                stroke="rgba(224,231,255,0.55)"
+                tick={{ fill: "#e0e7ff", fontSize: 10 }}
                 tickLine={false}
               />
               <Tooltip
-                cursor={{ fill: "rgba(255,255,255,0.18)" }}
+                cursor={{ fill: "rgba(255,255,255,0.12)" }}
                 contentStyle={{
-                  backgroundColor: "#f7f4ef",
-                  border: "1px solid #d8cfc4",
-                  borderRadius: "4px",
-                  color: "#171717",
+                  backgroundColor: "#ffffff",
+                  border: "1px solid #c7d2fe",
+                  borderRadius: "10px",
+                  color: "#312e81",
+                  boxShadow: "0 10px 25px rgba(49, 46, 129, 0.2)",
                 }}
                 formatter={(value: number) => [`${value} units`, "Sold"]}
                 labelFormatter={(label, payload) => {
@@ -410,8 +419,8 @@ export function TopSellingChart() {
                   return typeof revenue === "number" ? `${label} - ${formatCurrency(revenue)}` : label;
                 }}
               />
-              <Bar dataKey="sales" radius={[0, 0, 0, 0]}>
-                <LabelList dataKey="sales" position="top" fill="#f8f8f8" fontSize={10} />
+              <Bar dataKey="sales" radius={[8, 8, 2, 2]} maxBarSize={46}>
+                <LabelList dataKey="sales" position="top" fill="#ffffff" fontSize={11} fontWeight={700} />
                 {chartData.map((_, index) => (
                   <Cell
                     key={`cell-${index}`}
