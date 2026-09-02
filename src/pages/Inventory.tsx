@@ -1304,17 +1304,17 @@ export default function Inventory() {
           </DialogHeader>
           <div className="grid gap-4 py-2">
             <label className="grid gap-2 text-sm font-medium">Critical stock (units)
-              <Input type="number" min="1" value={thresholdDraft.critical} onChange={(event) => setThresholdDraft((current) => ({ ...current, critical: Math.max(1, Number(event.target.value) || 1) }))} />
+              <Input className="border-[#d9d2c9] bg-white text-[#171717]" type="number" min="1" value={thresholdDraft.critical} onChange={(event) => setThresholdDraft((current) => ({ ...current, critical: Math.max(1, Number(event.target.value) || 1) }))} />
             </label>
             <label className="grid gap-2 text-sm font-medium">Low stock (units)
-              <Input type="number" min={thresholdDraft.critical + 1} value={thresholdDraft.low} onChange={(event) => setThresholdDraft((current) => ({ ...current, low: Math.max(current.critical + 1, Number(event.target.value) || current.critical + 1) }))} />
+              <Input className="border-[#d9d2c9] bg-white text-[#171717]" type="number" min={thresholdDraft.critical + 1} value={thresholdDraft.low} onChange={(event) => setThresholdDraft((current) => ({ ...current, low: Math.max(current.critical + 1, Number(event.target.value) || current.critical + 1) }))} />
             </label>
             <label className="grid gap-2 text-sm font-medium">Expiring soon (days)
-              <Input type="number" min="1" value={thresholdDraft.expiryDays} onChange={(event) => setThresholdDraft((current) => ({ ...current, expiryDays: Math.max(1, Number(event.target.value) || 1) }))} />
+              <Input className="border-[#d9d2c9] bg-white text-[#171717]" type="number" min="1" value={thresholdDraft.expiryDays} onChange={(event) => setThresholdDraft((current) => ({ ...current, expiryDays: Math.max(1, Number(event.target.value) || 1) }))} />
             </label>
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => { setThresholdDraft(thresholds); setIsThresholdDialogOpen(false); }}>Cancel</Button>
+            <Button className="border-[#d9d2c9] bg-white text-[#171717] hover:bg-[#eee9e2] hover:text-[#171717]" type="button" variant="outline" onClick={() => { setThresholdDraft(thresholds); setIsThresholdDialogOpen(false); }}>Cancel</Button>
             <Button type="button" onClick={() => { const next = { ...thresholdDraft, low: Math.max(thresholdDraft.low, thresholdDraft.critical + 1) }; setThresholds(next); setThresholdDraft(next); saveInventoryThresholds(user?.id, next); setIsThresholdDialogOpen(false); toast.success("Inventory thresholds saved."); }}>Save thresholds</Button>
           </DialogFooter>
         </DialogContent>

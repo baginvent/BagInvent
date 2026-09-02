@@ -4,6 +4,8 @@ import {
   ArrowDownLeft,
   ArrowUpRight,
   Calendar,
+  Check,
+  ChevronsUpDown,
   Download,
   FileSpreadsheet,
   Loader2,
@@ -38,6 +40,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -943,6 +954,8 @@ const saveTransactionRecord = async ({
 
 export default function Transactions() {
   const [form, setForm] = useState(defaultForm);
+  const [isCategoryPickerOpen, setIsCategoryPickerOpen] = useState(false);
+  const [categorySearch, setCategorySearch] = useState("");
   const [exportFormat, setExportFormat] = useState<ExportFormat>("csv");
   const [typeFilter, setTypeFilter] = useState("all");
   const [dateFilterType, setDateFilterType] = useState<DateFilterType>("all");
@@ -1769,35 +1782,84 @@ export default function Transactions() {
                     <Label htmlFor="category" className="text-sm font-medium text-[#171717]">
                       Category
                     </Label>
-                    <Input
-                      id="category"
-                      value={form.category}
-                      onChange={(event) => setForm({ ...form, category: event.target.value })}
-                      className={fieldClassName}
-                      placeholder="Start typing category..."
-                      required
-                    />
-                    {categoryOptions.length > 0 ? (
-                      <div className="mt-2 overflow-x-auto pb-1">
-                        <div className="flex gap-2 whitespace-nowrap">
-                          {categoryOptions.map((categoryOption) => (
-                            <button
-                              key={categoryOption}
-                              type="button"
-                              onClick={() => setForm({ ...form, category: categoryOption })}
-                              className={
-                                normalizeProductText(form.category) ===
-                                normalizeProductText(categoryOption)
-                                  ? "rounded-full bg-primary px-3 py-1 text-xs font-medium text-white"
-                                  : "rounded-full bg-[#efebe6] px-3 py-1 text-xs font-medium text-[#171717]"
-                              }
+                    <Popover open={isCategoryPickerOpen} onOpenChange={setIsCategoryPickerOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          id="category"
+                          type="button"
+                          variant="outline"
+                          role="combobox"
+                          aria-expanded={isCategoryPickerOpen}
+                          className={cn(fieldClassName, "w-full justify-between font-normal hover:bg-white")}
+                        >
+                          <span className={form.category ? "text-[#171717]" : "text-[#777]"}>
+                            {form.category || "Select or search a category..."}
+                          </span>
+                          <ChevronsUpDown className="h-4 w-4 shrink-0 text-[#666]" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent
+                        align="start"
+                        className="w-[var(--radix-popover-trigger-width)] border-[#d9d2c9] bg-[#f7f4ef] p-0 text-[#171717]"
+                      >
+                        <Command className="bg-transparent text-[#171717]">
+                          <CommandInput
+                            value={categorySearch}
+                            onValueChange={setCategorySearch}
+                            placeholder="Search categories..."
+                            className="text-[#171717] placeholder:text-[#777]"
+                          />
+                          <CommandList>
+                            <CommandEmpty>No category found.</CommandEmpty>
+                            <CommandGroup
+                              heading="Categories"
+                              className="text-[#171717] [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:text-[#4a4541]"
                             >
-                              {categoryOption}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
+                              {categoryOptions.map((categoryOption) => (
+                                <CommandItem
+                                  key={categoryOption}
+                                  value={categoryOption}
+                                  className="text-[#171717] data-[selected=true]:bg-[#e8ded4] data-[selected=true]:text-[#171717]"
+                                  onSelect={() => {
+                                    setForm({ ...form, category: categoryOption });
+                                    setCategorySearch("");
+                                    setIsCategoryPickerOpen(false);
+                                  }}
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 h-4 w-4",
+                                      normalizeProductText(form.category) === normalizeProductText(categoryOption)
+                                        ? "opacity-100"
+                                        : "opacity-0",
+                                    )}
+                                  />
+                                  {categoryOption}
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                            {categorySearch.trim() && !categoryOptions.some((option) => normalizeProductText(option) === normalizeProductText(categorySearch)) ? (
+                              <CommandGroup
+                                heading="New category"
+                                className="text-[#171717] [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:text-[#4a4541]"
+                              >
+                                <CommandItem
+                                  value={`Create ${categorySearch.trim()}`}
+                                  className="text-[#171717] data-[selected=true]:bg-[#e8ded4] data-[selected=true]:text-[#171717]"
+                                  onSelect={() => {
+                                    setForm({ ...form, category: categorySearch.trim() });
+                                    setCategorySearch("");
+                                    setIsCategoryPickerOpen(false);
+                                  }}
+                                >
+                                  Use &quot;{categorySearch.trim()}&quot;
+                                </CommandItem>
+                              </CommandGroup>
+                            ) : null}
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
                   </div>
 
                   <div className="space-y-2">

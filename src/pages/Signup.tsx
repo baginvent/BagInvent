@@ -19,6 +19,14 @@ import {
 
 type Step = 1 | 2 | 3;
 
+const passwordRequirements = "Use 8–24 characters with an uppercase letter, number, and special character.";
+const isStrongPassword = (password: string) =>
+  password.length >= 8 &&
+  password.length <= 24 &&
+  /[A-Z]/.test(password) &&
+  /\d/.test(password) &&
+  /[^A-Za-z0-9\s]/.test(password);
+
 export default function Signup() {
   const navigate = useNavigate();
   const [step, setStep] = useState<Step>(1);
@@ -72,8 +80,8 @@ export default function Signup() {
       return false;
     }
 
-    if (formData.password.length < 6) {
-      toast.error("Password must be at least 6 characters");
+    if (!isStrongPassword(formData.password)) {
+      toast.error(passwordRequirements);
       return false;
     }
 
@@ -300,6 +308,10 @@ export default function Signup() {
                   value={formData.password}
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                   className={`${inputClassName} pr-10`}
+                  minLength={8}
+                  maxLength={24}
+                  title={passwordRequirements}
+                  autoComplete="new-password"
                   required
                 />
                 <button
@@ -310,6 +322,7 @@ export default function Signup() {
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
+              <p className="text-xs text-[#dad2ca]">{passwordRequirements}</p>
             </div>
 
             <div className="space-y-2">
@@ -325,6 +338,9 @@ export default function Signup() {
                     setFormData({ ...formData, confirmPassword: e.target.value })
                   }
                   className={`${inputClassName} pr-10`}
+                  minLength={8}
+                  maxLength={24}
+                  autoComplete="new-password"
                   required
                 />
                 <button
@@ -417,6 +433,10 @@ export default function Signup() {
                   value={formData.password}
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                   className={`${secondaryInputClassName} pr-10`}
+                  minLength={8}
+                  maxLength={24}
+                  title={passwordRequirements}
+                  autoComplete="new-password"
                   required
                 />
                 <button
@@ -427,6 +447,7 @@ export default function Signup() {
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
+              <p className="text-xs text-[#dad2ca]">{passwordRequirements}</p>
             </div>
 
             <div className="space-y-2">
@@ -445,6 +466,9 @@ export default function Signup() {
                     setFormData({ ...formData, confirmPassword: e.target.value })
                   }
                   className={`${secondaryInputClassName} pr-10`}
+                  minLength={8}
+                  maxLength={24}
+                  autoComplete="new-password"
                   required
                 />
                 <button

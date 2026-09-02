@@ -13,7 +13,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
 import { isMissingTransactionsTableError } from "@/lib/demoData";
 import { buildMockTransactions } from "@/lib/forecastInsights";
-import { getInventoryThresholds, getStockLevel } from "@/lib/inventoryInsights";
+import { getDaysUntilExpiry, getInventoryThresholds, getStockLevel } from "@/lib/inventoryInsights";
 
 type Product = Tables<"products">;
 type Transaction = Tables<"transactions">;
@@ -70,9 +70,8 @@ export function NotificationMenu() {
   });
 
   const notifications = useMemo(() => {
-    const inventory: NotificationItem[] = products
+    const stockAlerts: NotificationItem[] = products
       .filter((product) => getStockLevel(product.quantity, thresholds) !== "normal")
-      .slice(0, 4)
       .map((product) => {
         const level = getStockLevel(product.quantity, thresholds);
         const description =
@@ -81,6 +80,25 @@ export function NotificationMenu() {
             : `${product.quantity} units left — ${level} stock level`;
         return { id: `inventory-${product.id}`, source: "Inventory", title: product.name, description, path: "/inventory" };
       });
+
+    const expiryAlerts: NotificationItem[] = products
+      .map((product) => ({ product, daysUntilExpiry: getDaysUntilExpiry(product.expiry_date) }))
+      .filter(({ daysUntilExpiry }) => daysUntilExpiry >= 0 && daysUntilExpiry <= thresholds.expiryDays)
+      .sort((a, b) => a.daysUntilExpiry - b.daysUntilExpiry)
+      .map(({ product, daysUntilExpiry }) => {
+        const description = daysUntilExpiry === 0
+          ? "Expires today — review or use this stock"
+          : `Expires in ${daysUntilExpiry} day${daysUntilExpiry === 1 ? "" : "s"} — review this stock`;
+        return {
+          id: `expiry-${product.id}`,
+          source: "Inventory",
+          title: `${product.name} expiry alert`,
+          description,
+          path: "/inventory",
+        };
+      });
+
+    const inventory = [...stockAlerts, ...expiryAlerts];
 
     const transactions: NotificationItem[] = (transactionResult?.items ?? []).slice(0, 3).map((transaction) => ({
       id: `transaction-${transaction.id}`,
